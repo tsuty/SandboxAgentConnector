@@ -1,0 +1,620 @@
+/* Transcript web view stylesheet.
+   Every color and font comes from the custom properties the host sets on :root
+   from the current IDE theme; the fallbacks only matter when the document is
+   opened outside the IDE. Plain CSS, no imports, no external resources (the
+   document runs under default-src 'none').
+
+   The one size the host is asked for is --ra-font-size, the base size of the
+   plugin settings: --ra-small-size and --ra-mono-size are derived from it
+   (ThemeTokens), and whatever has to grow with the text is stated in em. */
+
+/* ---------- reset / layout ---------- */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+[hidden] { display: none !important; }
+
+html { overflow-x: hidden; }
+
+body {
+  margin: 0;
+  padding: 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--ra-bg, #ffffff);
+  color: var(--ra-fg, #000000);
+  font-family: var(--ra-font, system-ui, sans-serif);
+  font-size: var(--ra-font-size, 13px);
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
+
+#transcript.transcript { display: flex; flex-direction: column; gap: 14px; }
+
+.entry,
+.block,
+.block-body,
+.fold,
+.group,
+.toolcall,
+.markdown { min-width: 0; }
+
+/* ---------- message blocks ---------- */
+
+.framed {
+  padding: 14px;
+  border: 1px solid var(--ra-border, #c9ccd6);
+  border-radius: 10px;
+}
+
+.quiet,
+.quiet * { color: var(--ra-quiet, #6e6e6e); font-size: var(--ra-small-size, 11px); }
+
+.block-header { display: flex; align-items: center; gap: 4px; min-height: 1.4em; }
+
+.block-icon { display: inline-flex; align-items: center; flex: 0 0 auto; }
+
+.block-title { font-size: var(--ra-small-size, 11px); font-weight: 600; }
+
+.block-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 80ms linear;
+}
+
+.block:hover .block-actions,
+.block-actions:focus-within { opacity: 1; }
+
+.block-body {
+  margin-top: 7px;
+}
+
+pre.stream {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--ra-font, system-ui, sans-serif);
+  font-size: var(--ra-font-size, 13px);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* pulled over the last body line instead of adding a row */
+.block-corner {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: -1.25em;
+  pointer-events: none;
+}
+
+.block-corner > * { pointer-events: auto; }
+
+/* ---------- notices ---------- */
+
+.notice {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--ra-quiet, #6e6e6e);
+  font-size: var(--ra-small-size, 11px);
+}
+
+.notice--error,
+.notice--error .notice-icon { color: var(--ra-error, #c75450); }
+
+.notice-icon { flex: 0 0 auto; align-self: center; }
+
+.notice-body { min-width: 0; overflow-wrap: anywhere; }
+
+/* ---------- folding ---------- */
+
+.anchor {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 3px 2px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  text-align: left;
+  color: var(--ra-quiet, #6e6e6e);
+  font-family: inherit;
+  font-size: var(--ra-small-size, 11px);
+  cursor: pointer;
+}
+
+.anchor:hover { background: var(--ra-hover-bg, rgba(0, 0, 0, 0.06)); }
+
+.caret {
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  margin: 0 2px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transition: transform 80ms linear;
+}
+
+.anchor[aria-expanded="true"] .caret { transform: rotate(90deg); }
+
+.anchor-text { min-width: 0; overflow-wrap: anywhere; }
+
+/* One line rows (a tool call, the label of a group) are cut off, never wrapped: see .toolcall-line */
+.toolcall-line .anchor { width: auto; overflow: hidden; }
+
+.toolcall-line .anchor-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.fold-body,
+.toolcall-body {
+  margin: 0.75em 0 0.75em 1.25em;
+  min-width: 0;
+}
+
+/* ---------- tool calls ---------- */
+
+/* a mode switch is the one call with a framed block of its own, so its title reads as a headline */
+.block--switch-mode .block-title { font-size: var(--ra-font-size, 13px); }
+
+.group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 1.25em;
+  margin-top: 4px;
+  min-width: 0;
+}
+
+/*
+   A tool call is one line and stays one line: a command long enough to wrap would push the icon
+   onto a row of its own and turn a quiet log into a wall of text, so the row does not wrap and
+   whatever does not fit is cut off with an ellipsis (the full text is in the tooltip).
+*/
+.toolcall-line {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ra-quiet, #6e6e6e);
+  font-size: var(--ra-small-size, 11px);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.toolcall-line > * { min-width: 0; }
+
+.prefix,
+.separator,
+.status { color: var(--ra-quiet, #6e6e6e); }
+
+.prefix,
+.separator { flex: 0 0 auto; }
+
+.status { flex: 0 0 auto; font-size: var(--ra-small-size, 11px); }
+
+.target {
+  color: var(--ra-link, #2470b3);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.toolcall-line .target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.target:hover { text-decoration: underline; }
+
+/*
+   Icons are references into the sprite the host inlined (TranscriptIcons): the drawing itself must
+   never be painted, only the <use> elements pointing at it. `fill: currentColor` is what makes an
+   icon follow the theme, since the sprite carries no color of its own.
+*/
+.icon-sprite { display: none; }
+
+/* sized in em so an icon keeps its proportion when the base font size changes */
+.icon {
+  width: 1.25em;
+  height: 1.25em;
+  flex: 0 0 auto;
+  vertical-align: text-bottom;
+  fill: currentColor;
+  color: var(--ra-quiet, #6e6e6e);
+}
+
+/* ---------- interaction ---------- */
+
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+
+.chip {
+  padding: 1px 6px;
+  border: 1px solid var(--ra-border, #c9ccd6);
+  border-radius: 10px;
+  background: none;
+  color: var(--ra-quiet, #6e6e6e);
+  font-family: inherit;
+  font-size: var(--ra-small-size, 11px);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.chip:hover { background: var(--ra-hover-bg, rgba(0, 0, 0, 0.06)); }
+
+.choices { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+
+.choice { display: flex; align-items: baseline; gap: 6px; min-width: 0; cursor: pointer; }
+
+.choice input[type="checkbox"] { flex: 0 0 auto; margin: 0; accent-color: var(--ra-accent, #3574f0); }
+
+.choices-actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 4px; }
+
+.button {
+  padding: 2px 10px;
+  border: 1px solid var(--ra-border, #c9ccd6);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ra-fg, #000000);
+  font-family: inherit;
+  font-size: var(--ra-font-size, 13px);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.button:hover { background: var(--ra-hover-bg, rgba(0, 0, 0, 0.06)); }
+
+.button--default {
+  border-color: var(--ra-accent, #3574f0);
+  background: var(--ra-accent, #3574f0);
+  color: #ffffff;
+}
+
+.button--default:hover { background: var(--ra-accent, #3574f0); filter: brightness(1.08); }
+
+.button[disabled],
+.icon-button[disabled] { opacity: 0.5; cursor: default; }
+
+.button[disabled]:hover,
+.icon-button[disabled]:hover { background: transparent; }
+
+.icon-button,
+.search-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 1px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ra-quiet, #6e6e6e);
+  cursor: pointer;
+}
+
+.icon-button:hover,
+.search-button:hover { background: var(--ra-hover-bg, rgba(0, 0, 0, 0.06)); }
+
+.permission-headline { font-weight: 600; overflow-wrap: anywhere; }
+
+.permission-body { min-width: 0; }
+
+.permission-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+
+.permission-status { margin-top: 4px; color: var(--ra-quiet, #6e6e6e); font-size: var(--ra-small-size, 11px); }
+
+/* ---------- markdown body (GitHub / IDE preview look) ---------- */
+
+.markdown { line-height: 1.6; overflow-wrap: break-word; }
+
+.markdown > *:first-child { margin-top: 0; }
+.markdown > *:last-child { margin-bottom: 0; }
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 1em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: break-word;
+}
+
+.markdown h1,
+.markdown h2 { padding-bottom: 0.25em; border-bottom: 1px solid var(--ra-border, #c9ccd6); }
+
+.markdown h1 { font-size: 1.8em; }
+.markdown h2 { font-size: 1.45em; }
+.markdown h3 { font-size: 1.2em; }
+.markdown h4 { font-size: 1em; }
+.markdown h5 { font-size: 0.9em; }
+
+.markdown h6 { font-size: 0.85em; color: var(--ra-quiet, #6e6e6e); }
+
+.markdown p { margin: 0 0 0.75em; }
+
+.markdown ul,
+.markdown ol { margin: 0 0 0.75em; padding-left: 1.5em; }
+
+.markdown ul ul,
+.markdown ul ol,
+.markdown ol ul,
+.markdown ol ol { margin: 0.15em 0 0; }
+
+.markdown li { margin: 0.15em 0; }
+.markdown li > p { margin: 0 0 0.4em; }
+
+.markdown a {
+  color: var(--ra-link, #2470b3);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.markdown a:hover { text-decoration: underline; }
+
+.markdown code {
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  background: var(--ra-code-bg, rgba(0, 0, 0, 0.06));
+  font-family: var(--ra-mono-font, ui-monospace, Menlo, monospace);
+  font-size: var(--ra-mono-size, 13px);
+  overflow-wrap: anywhere;
+}
+
+/*
+   A code block and its copy button: the button belongs to the wrapper, not to the `pre`, so it
+   stays in the corner while the code scrolls sideways underneath it.
+*/
+.code-block {
+  position: relative;
+  margin: 0 0 0.75em;
+  max-width: 100%;
+}
+
+.code-block > pre { margin: 0; }
+
+.code-copy {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 3px;
+  border: 1px solid var(--ra-border, #c9ccd6);
+  /* The button sits on the code block, not on the page, so it hides the code behind its own
+     background rather than the page's one. */
+  background: var(--ra-code-bg, rgba(0, 0, 0, 0.06));
+  opacity: 0;
+  transition: opacity 80ms linear;
+}
+
+/*
+   `--ra-hover-bg` is the translucent hover of a toolbar button, so it is painted as a layer over
+   the code background instead of replacing it: `.icon-button:hover` alone would let the code
+   scrolling underneath show through the button.
+*/
+.code-copy:hover {
+  background-color: var(--ra-code-bg, rgba(0, 0, 0, 0.06));
+  background-image: linear-gradient(
+    var(--ra-hover-bg, rgba(0, 0, 0, 0.06)),
+    var(--ra-hover-bg, rgba(0, 0, 0, 0.06))
+  );
+}
+
+.code-block:hover .code-copy,
+.code-copy:focus { opacity: 1; }
+
+.markdown pre {
+  margin: 0 0 0.75em;
+  padding: 1em;
+  max-width: 100%;
+  border-radius: 6px;
+  background: var(--ra-code-bg, rgba(0, 0, 0, 0.06));
+  overflow-x: auto;
+  white-space: pre;
+  font-family: var(--ra-mono-font, ui-monospace, Menlo, monospace);
+  font-size: var(--ra-mono-size, 13px);
+  line-height: 1.45;
+}
+
+.markdown pre > code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  white-space: pre;
+  overflow-wrap: normal;
+  font-size: inherit;
+}
+
+/*
+   Code tokens. The classes are put on by the host, which lexes a fence with the language the IDE
+   would use for it (CodeHighlighter), and the colors are the ones of the current editor scheme
+   (ThemeTokens). A category the scheme says nothing about simply keeps the text color.
+*/
+.hl-keyword { color: var(--ra-hl-keyword, inherit); }
+.hl-string { color: var(--ra-hl-string, inherit); }
+.hl-number { color: var(--ra-hl-number, inherit); }
+.hl-comment { color: var(--ra-hl-comment, inherit); font-style: italic; }
+.hl-doc { color: var(--ra-hl-doc, inherit); font-style: italic; }
+.hl-function { color: var(--ra-hl-function, inherit); }
+.hl-type { color: var(--ra-hl-type, inherit); }
+.hl-constant { color: var(--ra-hl-constant, inherit); }
+.hl-field { color: var(--ra-hl-field, inherit); }
+.hl-metadata { color: var(--ra-hl-metadata, inherit); }
+.hl-tag { color: var(--ra-hl-tag, inherit); }
+.hl-attribute { color: var(--ra-hl-attribute, inherit); }
+.hl-operator { color: var(--ra-hl-operator, inherit); }
+.hl-predefined { color: var(--ra-hl-predefined, inherit); }
+
+.markdown blockquote {
+  margin: 0 0 0.75em;
+  padding: 0 0 0 0.8em;
+  border-left: 3px solid var(--ra-border, #c9ccd6);
+  color: var(--ra-quiet, #6e6e6e);
+}
+
+.markdown blockquote > *:last-child { margin-bottom: 0; }
+
+/* the table scrolls on its own so a wide one cannot widen the tool window */
+.markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 0 0.75em;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+.markdown th,
+.markdown td {
+  padding: 4px 10px;
+  border: 1px solid var(--ra-border, #c9ccd6);
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown th { font-weight: 600; }
+.markdown tr:nth-child(2n) { background: var(--ra-code-bg, rgba(0, 0, 0, 0.06)); }
+
+.markdown hr { height: 1px; margin: 1em 0; border: 0; background: var(--ra-border, #c9ccd6); }
+
+.markdown img { max-width: 100%; }
+
+/* GFM task lists: org.intellij.markdown emits a plain <li> with a checkbox */
+.markdown ul.task-list,
+.markdown ul:has(> li > input[type="checkbox"]) { padding-left: 0.4em; list-style: none; }
+
+.markdown li.task-list-item,
+.markdown li:has(> input[type="checkbox"]) { padding-left: 0; list-style: none; }
+
+.markdown li > input[type="checkbox"] { margin: 0 0.35em 0 0; vertical-align: middle; accent-color: var(--ra-accent, #3574f0); }
+
+/* ---------- search bar ---------- */
+
+/*
+   Pinned to the bottom edge of the viewport: jumping from one match to the next scrolls the
+   document, and a bar that scrolled with it would be gone after the first jump — with it the
+   query and the `3/17` counter. While it is open the body carries a matching bottom padding
+   (search-open), so the last entry can still be scrolled clear of the bar.
+*/
+.search {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  background: var(--ra-bg, #ffffff);
+  border-top: 1px solid var(--ra-border, #c9ccd6);
+}
+
+body.search-open { padding-bottom: var(--ra-search-height, 40px); }
+
+.search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 1px 4px;
+  border: 1px solid var(--ra-border, #c9ccd6);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ra-fg, #000000);
+  font-family: inherit;
+  font-size: var(--ra-font-size, 13px);
+}
+
+.search-input:focus { outline: none; border-color: var(--ra-accent, #3574f0); }
+
+.search-count { flex: 0 0 auto; color: var(--ra-quiet, #6e6e6e); font-size: var(--ra-small-size, 11px); }
+
+mark.search-hit { border-radius: 2px; background: var(--ra-selection-bg, rgba(53, 116, 240, 0.3)); color: inherit; }
+
+mark.search-hit--current { background: var(--ra-accent, #3574f0); color: #ffffff; }
+
+/* ---------- scroll to bottom ---------- */
+
+/*
+   The jump to the newest entry. Out of the flow like the toast, so showing and hiding it can never
+   move the transcript, and above the search bar in the same way — it steps over that one while it
+   is open. Unlike the other icon buttons it carries a background of its own: it floats over the
+   text of the transcript, which would otherwise show through it.
+*/
+.scroll-down {
+  position: fixed;
+  right: 4px;
+  bottom: 4px;
+  z-index: 2;
+  padding: 4px;
+  background: var(--ra-bg, #ffffff);
+}
+
+/* `.icon-button` gives it a `display`, which an author rule keeps over the `hidden` of the UA. */
+.scroll-down[hidden] { display: none; }
+
+/* Layered like `.code-copy:hover`, so the transcript underneath stays hidden while hovering. */
+.scroll-down:hover {
+  background-color: var(--ra-bg, #ffffff);
+  background-image: linear-gradient(
+    var(--ra-hover-bg, rgba(0, 0, 0, 0.06)),
+    var(--ra-hover-bg, rgba(0, 0, 0, 0.06))
+  );
+}
+
+body.search-open .scroll-down { bottom: calc(var(--ra-search-height, 40px) + 12px); }
+
+/* ---------- toast ---------- */
+
+/*
+   Transient message of the host (a copy that went through). It floats over the bottom edge, out of
+   the flow, so it can never move the transcript; it sits above the search bar and steps over it
+   when that one is open. Clicks pass through: it is a message, not a control.
+*/
+.toast {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  z-index: 3;
+  max-width: calc(100% - 28px);
+  padding: 4px 12px;
+  border: 1px solid var(--ra-border, #c9ccd6);
+  border-radius: 12px;
+  background: var(--ra-bg, #ffffff);
+  color: var(--ra-fg, #000000);
+  font-size: var(--ra-small-size, 11px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 6px);
+  transition: opacity 120ms linear, transform 120ms linear;
+}
+
+body.search-open .toast { bottom: calc(var(--ra-search-height, 40px) + 12px); }
+
+.toast--shown { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- diff colors ---------- */
+
+.diff-added { background: var(--ra-added-bg, rgba(87, 166, 74, 0.2)); }
+.diff-removed { background: var(--ra-removed-bg, rgba(199, 84, 80, 0.2)); }

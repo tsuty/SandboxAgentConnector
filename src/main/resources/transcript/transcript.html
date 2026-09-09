@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="utf-8">
+    <!--
+      The transcript shows what an agent (and the tools it runs) wrote, which is untrusted input:
+      nothing but the bundled style sheet and the bundled script may run, and nothing at all may be
+      loaded from the network. The Kotlin side sanitizes the HTML on top of this (TranscriptHtml).
+    -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none'; style-src 'nonce-{{NONCE}}'; script-src 'nonce-{{NONCE}}'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>Transcript</title>
+    <style nonce="{{NONCE}}">{{CSS}}</style>
+</head>
+<body>
+<!--
+  Every icon of the document, once, as <symbol> elements the script refers to with <use>: the
+  drawings are files under icons/transcript/ (see docs/development/ICONS.md), inlined here by
+  TranscriptIcons because the strict CSP lets nothing be loaded.
+-->
+{{ICONS}}
+<div id="transcript" class="transcript"></div>
+<!--
+  The search bar is pinned to the bottom edge of the viewport, so it stays in reach while the
+  document scrolls from one match to the next.
+-->
+<div id="search" class="search" hidden>
+    <input id="search-input" class="search-input" type="text" placeholder="Search" spellcheck="false">
+    <span id="search-count" class="search-count"></span>
+    <button class="search-button" data-search="prev" title="Previous match">&#8593;</button>
+    <button class="search-button" data-search="next" title="Next match">&#8595;</button>
+    <button class="search-button" data-search="close" title="Close">&#10005;</button>
+</div>
+<!--
+  Jumps to the newest entry. It floats over the bottom right corner and is only shown while there
+  is something below the viewport (see `updateScrollDown` in transcript.js).
+-->
+<button id="scroll-down" class="icon-button scroll-down" title="Scroll to the bottom" hidden></button>
+<!--
+  Transient message of the host, e.g. the confirmation of a copy. It floats over the bottom edge
+  and is only visible while it carries the `toast--shown` class.
+-->
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script nonce="{{NONCE}}">{{JS}}</script>
+</body>
+</html>

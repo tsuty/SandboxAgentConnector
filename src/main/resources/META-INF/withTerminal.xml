@@ -1,0 +1,7 @@
+<!--
+  Loaded only when the bundled Terminal plugin is enabled, which is what makes the terminal
+  classes visible to `SandboxTerminal`. Nothing is contributed: the `Open Sandbox Terminal` entry
+  of the tool window options menu simply reports the plugin as missing when it is switched off.
+-->
+<idea-plugin>
+</idea-plugin>

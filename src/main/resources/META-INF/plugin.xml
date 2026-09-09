@@ -1,0 +1,146 @@
+<idea-plugin>
+    <id>com.tsuty.remoteagent</id>
+    <name>Remote Agent Connector</name>
+    <vendor url="https://github.com/tsuty">tsuty</vendor>
+
+    <description><![CDATA[
+    <p>
+      <b>Remote Agent Connector</b> lets you pair-program with an AI coding agent that runs inside an
+      isolated sandbox (Docker Sandboxes <code>sbx</code>, Docker, Apple Container or WSL Containers),
+      while your IDE stays lightweight on the host.
+      Only agent execution, file editing and tool invocation are offloaded to the sandbox &mdash;
+      you keep the native editor, diff viewer, navigation and debugger.
+    </p>
+    <p>
+      The plugin talks to the agent over stdio using the
+      <a href="https://agentclientprotocol.com/">Agent Client Protocol (ACP v1)</a>, a JSON-RPC 2.0 based protocol,
+      so any ACP-compatible agent (for example the Claude Code ACP adapter) can be used.
+    </p>
+
+    <h3>Highlights</h3>
+    <ul>
+        <li><b>Sandbox isolation</b> &ndash; the agent reads, writes and runs commands only inside the sandbox,
+            so your local environment and secrets are never touched by accident.
+            The plugin advertises no client-side file system (read or write) or terminal capability.
+            Credentials such as API keys are never forwarded from the IDE: they have to be present in the
+            sandbox already.</li>
+        <li><b>Inline approval</b> &ndash; every file change or command execution requested through
+            <code>session/request_permission</code> appears as a permission card in the tool window,
+            with a compact diff, a link to the native full diff viewer, and the exact command to be run.</li>
+        <li><b>IDE-native chat UI</b> &ndash; Markdown streaming, collapsible thinking log, tool-call cards with
+            live status, plan cards, interactive task-list choices, slash commands and token usage.
+            The transcript is rendered in an embedded browser (JCEF), with syntax highlighting by the IDE
+            lexers; <code>Enter</code> sends and <code>Shift+Enter</code> inserts a newline (rebindable in the
+            IDE keymap).</li>
+        <li><b>Explicit context control</b> &ndash; the active file, the selection and manually attached files are
+            shown as removable chips above the prompt, so you always see what is sent to the model.
+            Auto-attach is off by default.</li>
+        <li><b>Session history</b> &ndash; sessions can be listed, switched, renamed and deleted; transcripts are
+            snapshotted locally and restored via <code>session/load</code> / <code>session/resume</code>.</li>
+        <li><b>Safe turns</b> &ndash; in-memory documents are flushed before a turn, the workspace is optionally
+            locked read-only in the IDE while the agent works, and changed paths are refreshed in the VFS afterwards.</li>
+        <li><b>Sandbox terminal</b> &ndash; <code>Open Sandbox Terminal</code> logs into the very same sandbox in a
+            terminal tab of the IDE; it needs the bundled Terminal plugin to be enabled.</li>
+        <li><b>Auditable traffic</b> &ndash; all JSON-RPC lines exchanged with the agent are written to a per-session
+            log file under the IDE log directory.</li>
+    </ul>
+
+    <h3>Getting started</h3>
+    <ol>
+        <li>Start a sandbox that mounts your project root read-write (for example <code>sbx</code>).</li>
+        <li>Configure the sandbox type, the sandbox name, the ACP agent (picked from the ACP registry) and the
+            remote workspace under <code>Settings &rarr; Tools &rarr; Remote Agent Connector</code>.</li>
+        <li>Open the <b>Remote Agent</b> tool window, attach to the sandbox and send your first prompt.</li>
+    </ol>
+    <p>
+      The bundled Markdown plugin is a required dependency, and the transcript needs JCEF: where
+      <code>JBCefApp.isSupported()</code> is <code>false</code>, the transcript falls back to plain text and
+      permission requests cannot be answered.
+    </p>
+    <p>
+      The plugin never starts or stops the sandbox itself; it only attaches to an already running one,
+      so you can keep working with the same container outside the IDE.
+      See the <a href="https://github.com/tsuty/RemoteAgentConnector">project page</a> for the full
+      specification and installation guide.
+    </p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+    <h3>0.1.0</h3>
+    <ul>
+        <li>Initial release.</li>
+        <li>ACP v1 (JSON-RPC 2.0 over stdio) client that attaches to an agent running in a sandbox
+            (Docker Sandboxes, Docker, Apple Container or WSL Containers).</li>
+        <li><code>Remote Agent</code> tool window: Markdown chat stream, thinking log, tool-call and plan cards,
+            slash commands, token usage and session history (switch / rename / delete).</li>
+        <li>Inline permission cards for file changes (compact diff plus native full diff viewer) and command execution.</li>
+        <li>Context chips for the active file, the selection and manually attached files, with auto-attach off by default.</li>
+        <li>Optional read-only workspace lock during a turn and automatic VFS refresh of sandbox-side changes.</li>
+        <li><code>Open Sandbox Terminal</code>: a login shell in the same sandbox, opened in a terminal tab of the IDE.</li>
+        <li>Per-session ACP traffic log under the IDE log directory.</li>
+        <li>Settings page under <code>Tools &rarr; Remote Agent Connector</code> for the sandbox type and name,
+            the login shell, the ACP agent (from the ACP registry; a <code>binary</code> distribution is started
+            with a command entered by hand), the agent startup idle timeout, the remote workspace path,
+            restoring the last session, the read-only workspace lock, context auto-attach and the transcript font size.</li>
+    </ul>
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+    <!-- Bundled with every IDE: provides `org.intellij.markdown`, used to render the agent answers. -->
+    <depends>org.intellij.plugins.markdown</depends>
+    <!-- Bundled as well, but switchable: it is what opens a terminal in the sandbox (SandboxTerminal). -->
+    <depends optional="true" config-file="withTerminal.xml">org.jetbrains.plugins.terminal</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Remote Agent"
+                    anchor="right"
+                    icon="/icons/toolWindowIcon.svg"
+                    factoryClass="com.tsuty.remoteagent.ui.RemoteAgentToolWindowFactory"/>
+
+        <projectService serviceImplementation="com.tsuty.remoteagent.service.RemoteAgentService"/>
+        <projectService serviceImplementation="com.tsuty.remoteagent.session.SessionMetadataStore"/>
+        <projectService serviceImplementation="com.tsuty.remoteagent.vfs.AgentWorkspaceGuard"/>
+
+        <!-- Locks the workspace in the IDE while the agent runs a turn; the sandbox keeps writing. -->
+        <writingAccessProvider implementation="com.tsuty.remoteagent.vfs.AgentWritingAccessProvider"/>
+
+        <projectService serviceImplementation="com.tsuty.remoteagent.settings.RemoteAgentSettingsState"/>
+        <projectConfigurable parentId="tools"
+                             id="com.tsuty.remoteagent.settings"
+                             displayName="Remote Agent Connector"
+                             instance="com.tsuty.remoteagent.settings.RemoteAgentSettingsConfigurable"/>
+
+        <!-- Carries what an action of the tool window cannot say in place, e.g. a sandbox terminal
+             that cannot be opened (see SandboxTerminal). -->
+        <notificationGroup id="Remote Agent Connector" displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <action id="com.tsuty.remoteagent.actions.SendPrompt"
+                class="com.tsuty.remoteagent.actions.SendPromptAction"
+                text="Send Prompt"
+                description="Sends the current prompt to the remote agent">
+            <keyboard-shortcut keymap="$default" first-keystroke="ENTER"/>
+        </action>
+        <action id="com.tsuty.remoteagent.actions.InsertNewline"
+                class="com.tsuty.remoteagent.actions.InsertNewlineAction"
+                text="Insert Newline in Prompt"
+                description="Inserts a newline in the prompt input without sending it">
+            <keyboard-shortcut keymap="$default" first-keystroke="shift ENTER"/>
+        </action>
+
+        <!-- Both are put into the `Options` menu of the tool window header by
+             RemoteAgentToolWindowFactory; they are registered here so they can be found and bound
+             to a shortcut like any other action. -->
+        <action id="com.tsuty.remoteagent.actions.OpenSandboxTerminal"
+                class="com.tsuty.remoteagent.actions.OpenSandboxTerminalAction"
+                icon="/icons/console.svg"
+                text="Open Sandbox Terminal"
+                description="Logs into the configured sandbox in a terminal tab of the IDE"/>
+        <action id="com.tsuty.remoteagent.actions.OpenRemoteAgentSettings"
+                class="com.tsuty.remoteagent.actions.OpenRemoteAgentSettingsAction"
+                icon="/icons/settings.svg"
+                text="Settings"
+                description="Opens the settings page of the Remote Agent Connector plugin"/>
+    </actions>
+</idea-plugin>
