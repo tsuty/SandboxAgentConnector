@@ -160,64 +160,6 @@ class FlatIconButton(
 }
 
 /**
- * Flat text plus a caret, used for the session title in the toolbar: a left click opens the
- * history dropdown, a right click the `Rename` / `Delete` menu.
- *
- * The text is elided in the middle of the control when it is longer than [maxCharacters], and the
- * full title always stays available as the tooltip.
- */
-class FlatCaretLabel(
-    private val placeholder: String,
-    private val maxCharacters: Int = 28,
-) : FlatControl({}) {
-
-    // The session title is the primary control of the toolbar row, so it uses the regular label
-    // font instead of the small one the secondary flat controls share.
-    private val label = JLabel(placeholder, SwingConstants.LEFT).apply {
-        font = JBUI.Fonts.label()
-        foreground = UIUtil.getLabelForeground()
-    }
-    private val caret = JLabel(AllIcons.General.ArrowDown)
-
-    var onLeftClick: () -> Unit = {}
-    var onRightClick: (MouseEvent) -> Unit = {}
-
-    /** Full title of the current session; `null` shows [placeholder]. */
-    var title: String? = null
-        set(value) {
-            field = value
-            val text = value?.takeIf { it.isNotBlank() }
-            label.text = text?.let { elide(it) } ?: placeholder
-            toolTipText = text ?: placeholder
-            revalidate()
-            repaint()
-        }
-
-    init {
-        toolTipText = placeholder
-        border = JBUI.Borders.empty(3, 4)
-        add(label)
-        add(caret)
-        addMouseListener(object : MouseAdapter() {
-            override fun mousePressed(e: MouseEvent) {
-                if (!isEnabled) return
-                if (e.isPopupTrigger || e.button == MouseEvent.BUTTON3) onRightClick(e) else onLeftClick()
-            }
-
-            override fun mouseReleased(e: MouseEvent) {
-                // macOS reports the popup trigger on release only.
-                if (isEnabled && e.isPopupTrigger) onRightClick(e)
-            }
-        })
-    }
-
-    override fun contentComponents(): List<JLabel> = listOf(label, caret)
-
-    private fun elide(text: String): String =
-        if (text.length <= maxCharacters) text else text.take(maxCharacters - 1).trimEnd() + "…"
-}
-
-/**
  * Borderless drop down: the current item plus a caret, without any combo box frame. The popup is
  * a plain IDE list popup, so the control looks like flat text until the mouse hovers it.
  *

@@ -1,5 +1,6 @@
 package com.tsuty.remoteagent.ui
 
+import com.intellij.ui.LayeredIcon
 import com.intellij.util.SVGLoader
 import org.junit.jupiter.api.Test
 import java.awt.image.BufferedImage
@@ -17,8 +18,9 @@ class RemoteAgentIconsTest {
     fun testIconsAreLoaded() {
         assertNotNull(RemoteAgentIcons.Send)
         assertNotNull(RemoteAgentIcons.Stop)
-        assertNotNull(RemoteAgentIcons.Connected)
         assertNotNull(RemoteAgentIcons.Disconnected)
+        assertNotNull(RemoteAgentIcons.DisconnectedStatus)
+        assertNotNull(RemoteAgentIcons.Notification)
         assertNotNull(RemoteAgentIcons.TokenUsage)
         assertNotNull(RemoteAgentIcons.NewSession)
         assertNotNull(RemoteAgentIcons.Console)
@@ -63,9 +65,9 @@ class RemoteAgentIconsTest {
     }
 
     /**
-     * The drawing an agent brings along must measure like a bundled icon: the connect / disconnect
-     * button sits in a toolbar of 16x16 icons, and a raster reported at the size of the device
-     * pixels used to paint it twice as large on a HiDPI screen.
+     * The drawing an agent brings along must measure like a bundled icon: it sits on a tab chip
+     * among 16x16 icons, and a raster reported at the size of the device pixels used to paint it
+     * twice as large on a HiDPI screen.
      */
     @Test
     fun `the agent icon measures like a bundled one`() {
@@ -75,21 +77,68 @@ class RemoteAgentIconsTest {
         assertEquals(expected, agent.iconHeight)
     }
 
-    /** Connecting adds the dot into the free corner; it must not resize the button. */
+    /** A mark goes into the free corner; whichever it is, it must not resize the chip. */
     @Test
-    fun `the connection icon keeps its size in both states`() {
-        val disconnected = RemoteAgentIcons.connection(AGENT_SVG, connected = false)
-        val connected = RemoteAgentIcons.connection(AGENT_SVG, connected = true)
-        assertEquals(RemoteAgentIcons.Disconnected.iconWidth, disconnected.iconWidth)
-        assertEquals(disconnected.iconWidth, connected.iconWidth)
-        assertEquals(disconnected.iconHeight, connected.iconHeight)
+    fun `the agent icon keeps its size whatever it is marked with`() {
+        val plain = RemoteAgentIcons.agentIcon(AGENT_SVG, AgentMark.NONE)
+        assertEquals(RemoteAgentIcons.Disconnected.iconWidth, plain.iconWidth)
+        AgentMark.entries.forEach { mark ->
+            val marked = RemoteAgentIcons.agentIcon(AGENT_SVG, mark)
+            assertEquals(plain.iconWidth, marked.iconWidth, "$mark resizes the chip")
+            assertEquals(plain.iconHeight, marked.iconHeight, "$mark resizes the chip")
+        }
     }
 
-    /** Without a drawing of its own the bundled pair stays what the button shows. */
+    /** Without a drawing of its own the bundled one stays what the chip shows. */
     @Test
-    fun `no agent drawing keeps the bundled pair`() {
-        assertSame(RemoteAgentIcons.Disconnected, RemoteAgentIcons.connection(null, connected = false))
-        assertSame(RemoteAgentIcons.Connected, RemoteAgentIcons.connection(" ", connected = true))
+    fun `no agent drawing keeps the bundled one`() {
+        assertSame(RemoteAgentIcons.Disconnected, RemoteAgentIcons.agentIcon(null, AgentMark.NONE))
+        assertSame(RemoteAgentIcons.Disconnected, RemoteAgentIcons.agentIcon(" ", AgentMark.NONE))
+    }
+
+    /**
+     * The two marks share the one corner the drawing leaves free, so they have to be drawn into
+     * the same place: a notification dot rendered anywhere else would land on the agent itself.
+     */
+    @Test
+    fun `both marks occupy the same corner`() {
+        val disconnected = markedPixels(RemoteAgentIcons.DisconnectedStatus)
+        val notification = markedPixels(RemoteAgentIcons.Notification)
+        assertTrue(disconnected.isNotEmpty(), "the disconnected mark renders as an empty image")
+        assertTrue(notification.isNotEmpty(), "the notification mark renders as an empty image")
+        val box = RemoteAgentIcons.DisconnectedStatus.iconWidth
+        listOf("disconnected" to disconnected, "notification" to notification).forEach { (name, pixels) ->
+            assertTrue(pixels.all { (x, _) -> x > box / 2 }, "the $name mark is not on the right")
+            assertTrue(pixels.all { (_, y) -> y < box / 2 }, "the $name mark is not on the top")
+        }
+    }
+
+    /**
+     * The pulse of a running turn fades the very icon the chip already shows, so it must not
+     * change what is laid out — and a chip that is not pulsing has to get its icon back untouched.
+     */
+    @Test
+    fun `pulsing only changes the opacity`() {
+        val icon = RemoteAgentIcons.agentIcon(AGENT_SVG, AgentMark.NONE)
+        assertSame(icon, RemoteAgentIcons.translucent(icon, 1f))
+        val faded = RemoteAgentIcons.translucent(icon, 0.35f)
+        assertEquals(icon.iconWidth, faded.iconWidth)
+        assertEquals(icon.iconHeight, faded.iconHeight)
+        assertTrue(opaqueColors(faded).isEmpty(), "a faded icon still paints fully opaque pixels")
+    }
+
+    /**
+     * Being attached with nothing pending is the normal state of a tab (it connects on its own
+     * when opened), so that state carries no mark at all: the icon is the drawing itself, with
+     * nothing layered over it.
+     */
+    @Test
+    fun `only a state worth telling is marked`() {
+        val agent = assertNotNull(RemoteAgentIcons.agent(AGENT_SVG), "the agent drawing did not render")
+        assertEquals(agent::class, RemoteAgentIcons.agentIcon(AGENT_SVG, AgentMark.NONE)::class)
+        assertTrue(RemoteAgentIcons.agentIcon(AGENT_SVG, AgentMark.DISCONNECTED) is LayeredIcon)
+        assertTrue(RemoteAgentIcons.agentIcon(null, AgentMark.DISCONNECTED) is LayeredIcon)
+        assertTrue(RemoteAgentIcons.agentIcon(AGENT_SVG, AgentMark.NOTIFICATION) is LayeredIcon)
     }
 
     /**
@@ -119,6 +168,19 @@ class RemoteAgentIconsTest {
     fun `a drawing keeps the colors it brought along`() {
         val icon = assertNotNull(RemoteAgentIcons.agent(AGENT_SVG), "the agent drawing did not render")
         assertEquals(setOf(0xd97757), opaqueColors(icon))
+    }
+
+    /** The coordinates of every pixel the [icon] paints at all, however faintly. */
+    private fun markedPixels(icon: Icon): List<Pair<Int, Int>> {
+        val image = BufferedImage(icon.iconWidth, icon.iconHeight, BufferedImage.TYPE_INT_ARGB)
+        val graphics = image.createGraphics()
+        try {
+            icon.paintIcon(null, graphics, 0, 0)
+        } finally {
+            graphics.dispose()
+        }
+        return (0 until image.width).flatMap { x -> (0 until image.height).map { y -> x to y } }
+            .filter { (x, y) -> image.getRGB(x, y) ushr 24 != 0 }
     }
 
     /** The colors of the pixels the [icon] paints without any transparency. */

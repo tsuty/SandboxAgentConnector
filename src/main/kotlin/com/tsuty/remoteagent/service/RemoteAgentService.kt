@@ -58,6 +58,7 @@ import com.tsuty.remoteagent.acp.key
 import com.tsuty.remoteagent.acp.plainText
 import com.tsuty.remoteagent.acp.promptAttachments
 import com.tsuty.remoteagent.acp.userPromptText
+import com.tsuty.remoteagent.session.SessionLockRegistry
 import com.tsuty.remoteagent.session.SessionMetadataStore
 import com.tsuty.remoteagent.session.SessionSnapshot
 import com.tsuty.remoteagent.session.SessionSnapshotStore
@@ -76,6 +77,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
@@ -104,6 +106,23 @@ class PermissionRequest(
     fun resolve(option: PermissionOption): Boolean = resolve(PermissionOutcome.selected(option))
 
     fun cancel(): Boolean = resolve(PermissionOutcome.cancelled())
+
+    /**
+     * Runs [action] once this request is answered, whichever way: the user picked an option, the
+     * auto-allow settings answered it before the UI ever saw it, or it lapsed with the turn (see
+     * [RemoteAgentService.cancelPendingPermissions]).
+     *
+     * There is no event for any of that, and none is worth adding: a request that goes away is not
+     * news for the transcript, only for whoever put up an affordance for it. A tab marks the
+     * request on its chip (`RemoteAgentTabsPanel`, [RemoteAgentEvent.PermissionRequested]) and has
+     * to take that mark down again even when nobody ever clicked it.
+     *
+     * [action] runs on whichever thread completed the request, so a listener touching Swing has to
+     * hop to the EDT itself.
+     */
+    fun onResolved(action: () -> Unit) {
+        outcome.invokeOnCompletion { action() }
+    }
 }
 
 /** UI facing events emitted by the service. */
@@ -294,6 +313,38 @@ class RemoteAgentService(private val project: Project) : Disposable {
     private val permissions = ConcurrentHashMap<String, PermissionRequest>()
 
     /**
+     * Identifies this tab for the 1st tier of the lock ([SessionLockRegistry]): unique per
+     * instance, so a sibling tab of the same project (a different [RemoteAgentService] instance)
+     * is still told apart from this one even though [lockRegistry] is shared project wide.
+     */
+    private val tabId: String = UUID.randomUUID().toString()
+
+    /**
+     * Fallback lock owner id used only when [lockRegistry] is unavailable (light tests without a
+     * project service container): the 1st tier is then effectively disabled, exactly as before it
+     * moved to the shared [SessionLockRegistry].
+     */
+    private val fallbackOwnerId: String by lazy { UUID.randomUUID().toString() }
+
+    /**
+     * Owner id used with the 2nd tier ([SessionMetadataStore]): the project wide id of
+     * [lockRegistry] when available, so every tab of the project is recognised as the same owner
+     * (Ph2 SS3.3) — duplicate opens between tabs of this very same window are already caught by
+     * the 1st tier before the 2nd tier is even consulted.
+     */
+    private fun lockOwnerId(): String = lockRegistry()?.ownerId ?: fallbackOwnerId
+
+    /**
+     * `sessionId`s currently locked by this instance, tracked locally because [lockRegistry] is
+     * now shared by every tab of the project: releasing "every lock this instance holds" must not
+     * touch a lock a sibling tab is holding for a different session.
+     */
+    private val heldSessionIds = ConcurrentHashMap.newKeySet<String>()
+
+    /** Heartbeat job of the lock currently held for [sessionIdRef]; refreshes both tiers. */
+    private val lockHeartbeatRef = AtomicReference<Job?>(null)
+
+    /**
      * Latest `available_commands_update` of the session. Agents advertise the slash commands once,
      * right after the session is created, so the list is remembered here for UI opened later.
      */
@@ -351,6 +402,20 @@ class RemoteAgentService(private val project: Project) : Disposable {
 
     val sessionTitle: String?
         get() = sessionTitleRef.get()
+
+    /**
+     * Text to show in place of the session title, chosen by [state] rather than by whether
+     * [sessionTitle] happens to be set yet. Opening a tab auto-connects (Ph2 §2), so once that
+     * succeeds ([SessionState.READY]) a session already exists even though the agent may not
+     * have named it yet — this reads "New session" then, never the disconnected placeholder.
+     * [SessionState.ERROR] still reads "No session": the failure itself is surfaced elsewhere
+     * (e.g. `chatLog.appendError`), not through this label.
+     */
+    fun presentableSessionTitle(): String = when (state) {
+        SessionState.DISCONNECTED, SessionState.ERROR -> "No session"
+        SessionState.CONNECTING -> "Connecting…"
+        SessionState.READY -> sessionTitle?.takeIf { it.isNotBlank() } ?: "New session"
+    }
 
     /** `true` when the agent can put the IDE back into an existing session. */
     val canRestoreSessions: Boolean
@@ -506,6 +571,9 @@ class RemoteAgentService(private val project: Project) : Disposable {
         // `mcpServers` stays empty on purpose: MCP is configured by the agent inside the sandbox.
         val created = acpClient.newSession(SessionNewParams(cwd = resolvedCwd(), mcpServers = emptyList()))
         adoptSession(created.sessionId, title = null, pristine = true)
+        // A session freshly created by `session/new` never has a lock owner yet, so this only
+        // fails if another owner raced us with a `session/load` of the very same id in between.
+        tryAcquireLock(created.sessionId)
         selectorsRef.set(SessionSelectors(created.models, created.modes, created.configOptions))
         publish(
             RemoteAgentEvent.SessionEstablished(
@@ -571,6 +639,67 @@ class RemoteAgentService(private val project: Project) : Disposable {
         trafficLogger?.onSessionEstablished(sessionId)
     }
 
+    /**
+     * Claims the duplicate-open lock of [sessionId] for this instance (Ph2 SS3.3). Fails only when
+     * another live owner holds it in either tier; on success a heartbeat keeps both tiers fresh so
+     * the TTL of SS3.4 never expires a lock that is actually still in use.
+     */
+    private fun tryAcquireLock(sessionId: String): Boolean {
+        val now = System.currentTimeMillis()
+        val registry = lockRegistry()
+        val local = registry?.tryAcquire(sessionId, tabId, LOCK_TTL_MILLIS, now)
+        if (registry != null && local == null) return false
+        val store = metadataStore()
+        if (store != null && !store.tryLock(sessionId, lockOwnerId(), LOCK_TTL_MILLIS, now)) {
+            local?.let { registry?.rollback(sessionId, it) }
+            return false
+        }
+        heldSessionIds += sessionId
+        startLockHeartbeat(sessionId)
+        return true
+    }
+
+    /** Releases both tiers of the lock of [sessionId] (Ph2 SS4.5); safe to call when unlocked. */
+    private fun releaseLock(sessionId: String) {
+        heldSessionIds -= sessionId
+        lockRegistry()?.release(sessionId, tabId)
+        metadataStore()?.unlock(sessionId, lockOwnerId())
+        lockHeartbeatRef.getAndSet(null)?.cancel()
+    }
+
+    /** Releases every lock still held by this instance, e.g. on [dispose]. */
+    private fun releaseAllLocks() {
+        lockHeartbeatRef.getAndSet(null)?.cancel()
+        heldSessionIds.toList().forEach { sessionId ->
+            heldSessionIds -= sessionId
+            lockRegistry()?.release(sessionId, tabId)
+            metadataStore()?.unlock(sessionId, lockOwnerId())
+        }
+    }
+
+    /**
+     * Ph2 SS3.3 order for a switch between sessions: the session left behind is unlocked first,
+     * then the destination is locked, so re-entering the very same session never fights itself.
+     */
+    private fun acquireSessionLock(sessionId: String): Boolean {
+        sessionIdRef.get()?.let { releaseLock(it) }
+        return tryAcquireLock(sessionId)
+    }
+
+    /** Keeps [sessionId]'s lock alive in both tiers while it is the current session. */
+    private fun startLockHeartbeat(sessionId: String) {
+        lockHeartbeatRef.getAndSet(null)?.cancel()
+        val job = scope.launch {
+            while (true) {
+                delay(LOCK_HEARTBEAT_MILLIS)
+                val now = System.currentTimeMillis()
+                lockRegistry()?.heartbeat(sessionId, tabId, now)
+                metadataStore()?.heartbeat(sessionId, lockOwnerId(), now)
+            }
+        }
+        lockHeartbeatRef.set(job)
+    }
+
     /** `sessionId` of the current session while it has not run a prompt yet. */
     private fun pristineSessionId(): String? = pristineSessionRef.get()?.takeIf { it == sessionIdRef.get() }
 
@@ -617,7 +746,7 @@ class RemoteAgentService(private val project: Project) : Disposable {
             selectorsRef.get()?.let { publish(it.toEvent()) }
             return
         }
-        sessionIdRef.set(null)
+        sessionIdRef.getAndSet(null)?.let { releaseLock(it) }
         commandsRef.set(emptyList())
         selectorsRef.set(null)
         publish(RemoteAgentEvent.SessionCleared)
@@ -688,6 +817,17 @@ class RemoteAgentService(private val project: Project) : Disposable {
             return
         }
         val sessionId = entry.sessionId
+        // Ph2 SS3.3/SS3.4: the previous session's lock is released before the new one is claimed,
+        // so re-entering the very same session never has to fight its own lock.
+        if (sessionId != sessionIdRef.get() && !acquireSessionLock(sessionId)) {
+            publish(
+                RemoteAgentEvent.SessionRestoreRejected(
+                    sessionId,
+                    "This session is already open in another window; close it there first.",
+                ),
+            )
+            return
+        }
         val snapshot = runCatching { snapshotStore.load(sessionId) }.getOrNull()
         if (!canRestoreSessions && snapshot == null) {
             publish(
@@ -1029,7 +1169,9 @@ class RemoteAgentService(private val project: Project) : Disposable {
         processManager = null
         trafficLogger = null
         initializeResult = null
-        sessionIdRef.set(null)
+        // Ph2 SS4.5: closing the session releases both lock tiers right away, so the same session
+        // can be reopened immediately from another window/tab instead of waiting out the TTL.
+        sessionIdRef.getAndSet(null)?.let { releaseLock(it) }
         pristineSessionRef.set(null)
         selectorsRef.set(null)
         promptJobRef.set(null)
@@ -1050,6 +1192,9 @@ class RemoteAgentService(private val project: Project) : Disposable {
     override fun dispose() {
         scope.cancel()
         closeSession()
+        // Belt and braces: [closeSession] already released the current session's lock, this also
+        // catches anything left over (e.g. a lock claimed but never adopted because of a race).
+        releaseAllLocks()
         listeners.clear()
     }
 
@@ -1200,6 +1345,10 @@ class RemoteAgentService(private val project: Project) : Disposable {
     private fun metadataStore(): SessionMetadataStore? =
         runCatching { SessionMetadataStore.getInstance(project) }.getOrNull()
 
+    /** `null` when the project service is unavailable (light tests), which disables the 1st tier. */
+    private fun lockRegistry(): SessionLockRegistry? =
+        runCatching { SessionLockRegistry.getInstance(project) }.getOrNull()
+
     /** `null` when the project service is unavailable (light tests), which disables the lock. */
     private fun workspaceGuard(): AgentWorkspaceGuard? = AgentWorkspaceGuard.getInstanceOrNull(project)
 
@@ -1218,6 +1367,15 @@ class RemoteAgentService(private val project: Project) : Disposable {
 
         /** `stderr` lines quoted in a failed start; enough for the npm error, short enough to read. */
         private const val STARTUP_TAIL_LINES = 5
+
+        /**
+         * TTL of the duplicate-open lock (Ph2 SS3.4): long enough that the heartbeat keeps a live
+         * lock well within it, short enough that a crashed owner's lock is not stuck for long.
+         */
+        private const val LOCK_TTL_MILLIS = 60_000L
+
+        /** Heartbeat interval of a held lock; well under [LOCK_TTL_MILLIS] so it never lapses. */
+        private const val LOCK_HEARTBEAT_MILLIS = 20_000L
     }
 }
 

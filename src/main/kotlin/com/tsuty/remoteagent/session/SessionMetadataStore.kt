@@ -18,6 +18,13 @@ class SessionMetadata(
     var renameOverride: String? = null,
     /** Epoch milliseconds of the last time the session was selected in the IDE. */
     var lastOpenedAt: Long = 0,
+    /**
+     * Id of the IDE process/window that currently holds the duplicate-open lock of this session
+     * (Ph2 §3.3, 2nd tier); `null` when the session is not locked.
+     */
+    var lockOwnerId: String? = null,
+    /** Epoch milliseconds of the last heartbeat of [lockOwnerId]; stale past the TTL (Ph2 §3.4). */
+    var lockedAtMillis: Long = 0,
 )
 
 /**
@@ -71,6 +78,66 @@ class SessionMetadataStore : PersistentStateComponent<SessionMetadataStore.State
     @Synchronized
     fun delete(sessionId: String) {
         state.sessions.removeAll { it.sessionId == sessionId }
+    }
+
+    /**
+     * Claims the duplicate-open lock of [sessionId] for [ownerId]. Fails only when another owner
+     * holds a lock that has not gone past [ttlMillis] yet (Ph2 §3.3/§3.4); a lock already held by
+     * [ownerId] is refreshed instead of rejected, so re-entering the same session is idempotent.
+     */
+    @Synchronized
+    fun tryLock(sessionId: String, ownerId: String, ttlMillis: Long, now: Long = System.currentTimeMillis()): Boolean {
+        if (isLockedByOther(sessionId, ownerId, ttlMillis, now)) return false
+        mutate(sessionId) {
+            it.lockOwnerId = ownerId
+            it.lockedAtMillis = now
+        }
+        return true
+    }
+
+    /** Refreshes the lock timestamp of [sessionId]; a no-op once [ownerId] no longer holds it. */
+    @Synchronized
+    fun heartbeat(sessionId: String, ownerId: String, now: Long = System.currentTimeMillis()) {
+        val existing = find(sessionId) ?: return
+        if (existing.lockOwnerId == ownerId) existing.lockedAtMillis = now
+    }
+
+    /** Releases the lock of [sessionId], but only when [ownerId] is the one holding it. */
+    @Synchronized
+    fun unlock(sessionId: String, ownerId: String) {
+        val existing = find(sessionId) ?: return
+        if (existing.lockOwnerId == ownerId) {
+            existing.lockOwnerId = null
+            existing.lockedAtMillis = 0
+        }
+    }
+
+    /** `true` when a live (non-expired) lock of a *different* owner blocks [sessionId]. */
+    @Synchronized
+    fun isLockedByOther(sessionId: String, ownerId: String, ttlMillis: Long, now: Long = System.currentTimeMillis()): Boolean {
+        val existing = find(sessionId) ?: return false
+        val owner = existing.lockOwnerId ?: return false
+        if (owner == ownerId) return false
+        return now - existing.lockedAtMillis < ttlMillis
+    }
+
+    /**
+     * Wipes every persisted lock, regardless of owner or TTL.
+     *
+     * Called once per IDE startup (see `RemoteAgentStartupActivity`): we trust that the same
+     * sandbox is never driven from two different IDE processes at once (good faith, not
+     * multi-process safety), so a lock that survived to the next launch can only be stale &mdash;
+     * left behind by a crash or an IDE exit that raced the save (the very bug
+     * [SessionLockRegistry.releaseAllBeforeSave] already guards against on a clean close). There is
+     * therefore no need to inspect [SessionMetadata.lockOwnerId] or [SessionMetadata.lockedAtMillis]
+     * here; every one of them is cleared unconditionally.
+     */
+    @Synchronized
+    fun clearAllLocks() {
+        state.sessions.forEach {
+            it.lockOwnerId = null
+            it.lockedAtMillis = 0
+        }
     }
 
     private fun mutate(sessionId: String, action: (SessionMetadata) -> Unit) {

@@ -75,6 +75,19 @@ class SessionHistoryPopupTest {
         )
     }
 
+    /** A long session title must not blow the dropdown up past the panel it belongs to. */
+    @Test
+    fun `the dropdown is capped at the width of the plugin panel`() {
+        assertEquals(300, SessionHistoryPopup.cellWidthFor(naturalWidth = 900, panelWidth = 300))
+        // Already narrower than the panel: nothing to force.
+        assertNull(SessionHistoryPopup.cellWidthFor(naturalWidth = 200, panelWidth = 300))
+        assertNull(SessionHistoryPopup.cellWidthFor(naturalWidth = 300, panelWidth = 300))
+        // A panel narrower than the minimum still leaves a readable row.
+        assertEquals(160, SessionHistoryPopup.cellWidthFor(naturalWidth = 900, panelWidth = 40))
+        // Not shown in the panel (no width yet): the natural width stands.
+        assertNull(SessionHistoryPopup.cellWidthFor(naturalWidth = 900, panelWidth = 0))
+    }
+
     @Test
     fun `the action step falls back to the session id when there is no title`() {
         val step = SessionActions.SessionActionsStep(SessionListEntry("sess_1")) {}

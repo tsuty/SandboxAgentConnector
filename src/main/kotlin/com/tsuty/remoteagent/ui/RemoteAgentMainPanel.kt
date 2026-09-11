@@ -16,7 +16,6 @@ import com.tsuty.remoteagent.actions.SendPromptAction
 import com.tsuty.remoteagent.acp.PermissionOption
 import com.tsuty.remoteagent.acp.SessionConfigCategory
 import com.tsuty.remoteagent.acp.SessionConfigOption
-import com.tsuty.remoteagent.acp.SessionListEntry
 import com.tsuty.remoteagent.acp.SessionModeState
 import com.tsuty.remoteagent.acp.SessionModelState
 import com.tsuty.remoteagent.acp.StopReason
@@ -26,8 +25,6 @@ import com.tsuty.remoteagent.service.RemoteAgentEvent
 import com.tsuty.remoteagent.service.RemoteAgentEventListener
 import com.tsuty.remoteagent.service.RemoteAgentService
 import com.tsuty.remoteagent.service.SessionState
-import com.tsuty.remoteagent.settings.RemoteAgentSettingsBridge
-import com.tsuty.remoteagent.settings.RemoteAgentSettingsState
 import com.tsuty.remoteagent.session.AgentMessageEntry
 import com.tsuty.remoteagent.session.NoticeEntry
 import com.tsuty.remoteagent.session.PlanSnapshotEntry
@@ -42,8 +39,8 @@ import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Cursor
 import java.awt.FlowLayout
-import java.awt.event.MouseEvent
-import javax.swing.Icon
+import java.awt.GridBagConstraints
+import java.awt.GridBagLayout
 import javax.swing.JPanel
 
 /**
@@ -54,9 +51,16 @@ import javax.swing.JPanel
  * Service events arrive on background threads and are marshalled onto the EDT before any
  * Swing state is touched.
  */
-class RemoteAgentMainPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
-
-    private val service = RemoteAgentService.getInstance(project)
+class RemoteAgentMainPanel(
+    private val project: Project,
+    /**
+     * The service instance this panel drives. Defaults to the project's shared instance for
+     * backward compatibility (a single tool window content, e.g. tests instantiating the panel
+     * directly); `RemoteAgentTabsPanel` passes a dedicated instance per tab instead, so each tab
+     * keeps its own sandbox process and ACP session alive independently (Ph2 §2/§4).
+     */
+    private val service: RemoteAgentService = RemoteAgentService.getInstance(project),
+) : JPanel(BorderLayout()), Disposable {
     // Choices the agent offers as a Markdown task list are answered straight from the transcript.
     private val chatLog = TranscriptPanel(project) { submitPrompt(it) }
     private val chips = ContextChipsPanel(project)
@@ -74,13 +78,13 @@ class RemoteAgentMainPanel(private val project: Project) : JPanel(BorderLayout()
      */
     private var replayingHistory = false
 
-    /** Second toolbar row, left: the connection state itself (`Disconnected` / `Ready` / …). */
+    /** Toolbar, left: the connection state itself (`Disconnected` / `Ready` / …). */
     private val statusLabel = JBLabel("Disconnected").apply {
         font = JBUI.Fonts.smallFont()
         foreground = UIUtil.getContextHelpForeground()
     }
 
-    /** Second toolbar row, right of [statusLabel]: transient messages ("Creating session…", errors). */
+    /** Toolbar, right of [statusLabel]: transient messages ("Creating session…", errors). */
     private val messageLabel = JBLabel().apply {
         font = JBUI.Fonts.smallFont()
         foreground = UIUtil.getContextHelpForeground()
@@ -88,19 +92,10 @@ class RemoteAgentMainPanel(private val project: Project) : JPanel(BorderLayout()
 
     /** Previous connection state, so a fresh connection can start from an empty transcript. */
     private var lastState: SessionState = SessionState.DISCONNECTED
-    /**
-     * Icon-only toggle showing the connection state (see [updateSessionState]): the agent, with
-     * the connection dot over it while the session is up. The drawing is the one the selected ACP
-     * registry entry ships (`RemoteAgentSettingsState.agentIconSvg`) and the bundled pair when
-     * there is none.
-     */
-    private val connectionButton = FlatIconButton(connectionIcon(false), "Disconnected") { toggleConnection() }
 
     /** Starts a fresh session: the transcript is cleared and the next prompt runs in a new session. */
     private val newSessionButton = FlatIconButton(RemoteAgentIcons.NewSession, "New Session") { startNewSession() }
 
-    /** Current session title; left click opens the history, right click `Rename` / `Delete`. */
-    private val sessionTitleLabel = FlatCaretLabel("No session")
     /** Flat, borderless selectors living in the prompt action bar; hidden until the agent reports items. */
     private val modelSelector = FlatSelector<SelectorItem>(
         tooltip = "Model",
@@ -156,12 +151,6 @@ class RemoteAgentMainPanel(private val project: Project) : JPanel(BorderLayout()
         promptInput.setAvailableCommands(service.availableCommands)
 
         updateSendButtonTooltip()
-        // Picking another agent in the settings changes what the connection button shows; the
-        // drawing may also arrive later than the dialog, since it is downloaded (see `AgentIcon`).
-        project.messageBus.connect(this).subscribe(
-            RemoteAgentSettingsBridge.TOPIC,
-            RemoteAgentSettingsBridge.Listener { onEdt { updateConnectionIcon() } },
-        )
         ApplicationManager.getApplication().messageBus.connect(this).subscribe(
             KeymapManagerListener.TOPIC,
             object : KeymapManagerListener {
@@ -190,58 +179,48 @@ class RemoteAgentMainPanel(private val project: Project) : JPanel(BorderLayout()
     }
 
     /**
-     * Toolbar, two rows: `{Connect/Disconnect} {Session title}` left aligned with `{New Session}`
-     * pushed to the right on the first row, and `{Status} {Message}` left aligned on the second.
-     * The split gives the session title and the new session icon a full row of their own, which
-     * they were too cramped to be readable in when everything shared a single line.
+     * Toolbar, a single row: `{Status} {Message}` left aligned with `{New Session}` pushed to the
+     * right.
+     *
+     * It used to be two rows, with the session title and the connection toggle on the first one.
+     * Both moved to the tab this panel is shown in (`RemoteAgentTabsPanel.TabChip`): the session
+     * is named right next to the tab it is open in instead of twice on screen, and the connection
+     * belongs to the tab too (one sandbox process per session, Ph2 §2), so every tab shows its own
+     * state rather than only the selected one showing it. What is left here is the state of *this*
+     * tab spelled out, which is also where its errors are shown — hence one row, not none.
      *
      * There is no `Clear` button: the transcript belongs to a session, so it is cleared when the
      * session changes (see [startNewSession] and [onSessionRestored]).
      */
     private fun toolbar(): JPanel {
-        sessionTitleLabel.onLeftClick = { SessionHistoryPopup.show(sessionTitleLabel, project, service) }
-        sessionTitleLabel.onRightClick = { event -> showSessionContextMenu(event) }
-
-        val left = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(ACTION_BAR_GAP), 0))
+        // `BorderLayout.WEST` stretches this side to the height of the row, which the taller
+        // button on the other side sets. A `FlowLayout` would leave its labels sitting at the top
+        // edge of that space, above the button they read next to; `GridBagLayout` centres its grid
+        // in the leftover height instead, so the text lines up with the button.
+        val left = JPanel(GridBagLayout())
         left.isOpaque = false
-        left.add(connectionButton)
-        left.add(sessionTitleLabel)
+        val labels = GridBagConstraints().apply { anchor = GridBagConstraints.WEST }
+        left.add(statusLabel, labels)
+        left.add(messageLabel, labels.apply { insets = JBUI.insetsLeft(ACTION_BAR_GAP * 2) })
 
         val right = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(ACTION_BAR_GAP), 0))
         right.isOpaque = false
         right.add(newSessionButton)
 
-        // FlowLayout already contributes ACTION_BAR_GAP on the outer sides, so only the remainder
-        // is added here to reach CONTENT_MARGIN from the tool window edges; the vertical gaps of
-        // the rows live on these borders too, so the icons start ROW_TOP_MARGIN below the top edge.
-        val firstRow = JPanel(BorderLayout())
-        firstRow.isOpaque = false
-        firstRow.border =
-            JBUI.Borders.empty(ROW_TOP_MARGIN, CONTENT_MARGIN - ACTION_BAR_GAP, 0, CONTENT_MARGIN - ACTION_BAR_GAP)
-        firstRow.add(left, BorderLayout.WEST)
-        firstRow.add(right, BorderLayout.EAST)
-
-        // Second row: the connection state, followed by the transient message of that state.
-        val secondRow = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(ACTION_BAR_GAP * 2), 0))
-        secondRow.isOpaque = false
-        secondRow.border =
-            JBUI.Borders.empty(2, CONTENT_MARGIN - ACTION_BAR_GAP * 2, 2, CONTENT_MARGIN - ACTION_BAR_GAP * 2)
-        secondRow.add(statusLabel)
-        secondRow.add(messageLabel)
-
-        // Each row carries its own insets, so the rows can start at CONTENT_MARGIN despite the
-        // different gaps their layouts contribute.
+        // The right side's FlowLayout already contributes its gap on the outer side, so only the
+        // remainder is added there to reach CONTENT_MARGIN from the tool window edge; the left
+        // side's GridBagLayout adds none. The vertical insets live on this border too, and are
+        // symmetric: the row is ROW_TOP_MARGIN away from both the top edge and the transcript.
         val panel = BackgroundPanel(BorderLayout())
-        panel.add(firstRow, BorderLayout.NORTH)
-        panel.add(secondRow, BorderLayout.CENTER)
+        panel.border = JBUI.Borders.empty(
+            ROW_TOP_MARGIN,
+            CONTENT_MARGIN,
+            ROW_TOP_MARGIN,
+            CONTENT_MARGIN - ACTION_BAR_GAP,
+        )
+        panel.add(left, BorderLayout.WEST)
+        panel.add(right, BorderLayout.EAST)
         return panel
-    }
-
-    private fun showSessionContextMenu(event: MouseEvent) {
-        val sessionId = service.sessionId ?: return
-        val entry = service.sessions.firstOrNull { it.sessionId == sessionId }
-            ?: SessionListEntry(sessionId = sessionId, title = service.sessionTitle)
-        SessionActions.showContextMenu(project, service, entry, sessionTitleLabel, event.point)
     }
 
     /** Clears the transcript and moves the service on to a fresh session. */
@@ -253,14 +232,6 @@ class RemoteAgentMainPanel(private val project: Project) : JPanel(BorderLayout()
         chatLog.clear()
         thinking.clear()
         replayingHistory = false
-    }
-
-    /** Attaches when disconnected, detaches when connecting or ready. */
-    private fun toggleConnection() {
-        when (service.state) {
-            SessionState.DISCONNECTED, SessionState.ERROR -> service.connect()
-            SessionState.CONNECTING, SessionState.READY -> service.disconnect()
-        }
     }
 
     private fun bottomPanel(): JPanel {
@@ -402,13 +373,13 @@ class RemoteAgentMainPanel(private val project: Project) : JPanel(BorderLayout()
             is RemoteAgentEvent.SessionRestoreRejected -> chatLog.appendError(event.message)
             RemoteAgentEvent.SessionCleared -> {
                 clearTranscript()
-                sessionTitleLabel.title = null
                 // The selectors belong to the session that was just left; the service publishes
                 // the ones of the fresh session (reused or newly created) right after.
                 populateSelectors(models = null, modes = null, configOptions = emptyList())
             }
-            is RemoteAgentEvent.SessionTitleChanged ->
-                if (event.sessionId == service.sessionId) sessionTitleLabel.title = event.title
+            // The title is rendered by the tab of this panel (`RemoteAgentTabsPanel.TabChip`),
+            // which listens to the very same event on the very same service.
+            is RemoteAgentEvent.SessionTitleChanged -> Unit
         }
     }
 
@@ -429,7 +400,6 @@ class RemoteAgentMainPanel(private val project: Project) : JPanel(BorderLayout()
      */
     private fun onSessionRestored(event: RemoteAgentEvent.SessionRestored) {
         clearTranscript()
-        sessionTitleLabel.title = event.title
         val snapshot = event.snapshot
         if (snapshot != null) {
             renderSnapshot(snapshot)
@@ -464,7 +434,6 @@ class RemoteAgentMainPanel(private val project: Project) : JPanel(BorderLayout()
         chatLog.appendSystemMessage(
             (if (event.restored) "Session restored: " else "Session started: ") + event.sessionId,
         )
-        sessionTitleLabel.title = service.sessionTitle
         populateSelectors(event.models, event.modes, event.configOptions)
     }
 
@@ -596,20 +565,9 @@ class RemoteAgentMainPanel(private val project: Project) : JPanel(BorderLayout()
         statusLabel.text = presentableState(state)
         messageLabel.icon = null
         messageLabel.text = message?.takeIf { it.isNotBlank() }.orEmpty()
-        connectionButton.icon = connectionIcon(connected)
-        connectionButton.toolTipText = when (state) {
-            SessionState.READY -> "Connected"
-            SessionState.CONNECTING -> "Connecting…"
-            // Attaching again is the first thing to try after a failed start (a partly downloaded
-            // agent is cached), so the button says so instead of just "Disconnected".
-            SessionState.ERROR -> "Connection failed — click to retry"
-            else -> "Disconnected"
-        }
         updateTurnState(service.isTurnRunning, connected)
         // The session controls only make sense while a session can exist.
-        sessionTitleLabel.isEnabled = connected
         newSessionButton.isEnabled = connected
-        sessionTitleLabel.title = service.sessionTitle
         if (!connected) {
             modelSelector.isVisible = false
             modeSelector.isVisible = false
@@ -666,17 +624,21 @@ class RemoteAgentMainPanel(private val project: Project) : JPanel(BorderLayout()
         if (application.isDispatchThread) action() else application.invokeLater({ action() }, project.disposed)
     }
 
+    /**
+     * Moves the keyboard focus to the prompt editor of this tab.
+     *
+     * Called by [RemoteAgentTabsPanel] right after a `CardLayout` switch shows this panel: hiding
+     * the previously active tab does not move the focus that was still sitting on one of its
+     * components, so without this the newly shown tab can look unresponsive — its own controls
+     * are visible but the keyboard focus is still, invisibly, on the tab just left.
+     */
+    fun focusPrompt() {
+        promptInput.requestFocusInWindow()
+    }
+
     override fun dispose() {
         service.removeListener(listener)
     }
-
-    private fun updateConnectionIcon() {
-        connectionButton.icon = connectionIcon(service.state == SessionState.READY)
-    }
-
-    /** The button icon for [connected], drawn with whatever the selected agent brought along. */
-    private fun connectionIcon(connected: Boolean): Icon =
-        RemoteAgentIcons.connection(RemoteAgentSettingsState.getInstance(project).agentIconSvgOrNull(), connected)
 
     private companion object {
 

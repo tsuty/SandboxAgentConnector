@@ -14,7 +14,9 @@ import com.tsuty.remoteagent.actions.OpenSandboxTerminalAction
 class RemoteAgentToolWindowFactory : ToolWindowFactory, DumbAware {
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
-        val panel = RemoteAgentMainPanel(project)
+        // Ph2 §2/§4: the tool window content is the tabs container, not a single main panel any
+        // more — each tab keeps its own sandbox process and ACP session alive independently.
+        val panel = RemoteAgentTabsPanel(project)
         val content = toolWindow.contentManager.factory.createContent(panel, null, false)
         content.setDisposer(panel)
         toolWindow.contentManager.addContent(content)

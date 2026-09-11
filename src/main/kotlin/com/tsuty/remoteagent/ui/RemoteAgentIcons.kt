@@ -8,6 +8,7 @@ import com.intellij.ui.LayeredIcon
 import com.intellij.ui.scale.JBUIScale
 import com.intellij.ui.scale.ScaleContext
 import com.intellij.util.SVGLoader
+import java.awt.AlphaComposite
 import java.awt.Component
 import java.awt.Graphics
 import java.awt.Graphics2D
@@ -16,6 +17,32 @@ import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.util.concurrent.ConcurrentHashMap
 import javax.swing.Icon
+
+/**
+ * What a tab's agent icon is marked with, in the one corner its drawing leaves free (see
+ * [RemoteAgentIcons.agentIcon]).
+ *
+ * The corner holds a single mark, so the states share it in the order they are declared in: a tab
+ * with no agent up cannot be waiting for an answer either, which is why [DISCONNECTED] outranks
+ * [NOTIFICATION].
+ */
+enum class AgentMark {
+    /**
+     * Nothing is drawn over the agent. Being attached with nothing pending is the normal state of
+     * a tab (it connects on its own when opened), and a mark that is always there marks nothing.
+     */
+    NONE,
+
+    /** The agent is not (yet) attached — the one failure a chip shows on its own. */
+    DISCONNECTED,
+
+    /**
+     * The agent is waiting for an answer the user has not given yet (a `session/request_permission`
+     * of a tab that is not in front). Tabs stay live in the background (Ph2 §2), so without this
+     * an agent could sit blocked on a tab nobody is looking at.
+     */
+    NOTIFICATION,
+}
 
 /**
  * Icons the plugin paints with Swing (toolbars, buttons, the tool window stripe).
@@ -31,18 +58,27 @@ object RemoteAgentIcons {
     @JvmField
     val Stop: Icon = IconLoader.getIcon("/icons/stop.svg", RemoteAgentIcons::class.java)
 
-    @JvmField
-    val Connected: Icon = IconLoader.getIcon("/icons/connected.svg", RemoteAgentIcons::class.java)
-
+    /**
+     * The agent of a tab that brought no drawing of its own (see [agent]), whatever the state of
+     * that tab: being connected is the normal state, so nothing is drawn over it there and only
+     * the failure is marked (see [DisconnectedStatus]).
+     */
     @JvmField
     val Disconnected: Icon = IconLoader.getIcon("/icons/disconnected.svg", RemoteAgentIcons::class.java)
 
     /**
-     * The dot that turns [Disconnected] into [Connected], as a layer of its own: an agent that
-     * brought its own drawing (see [agent]) is marked with the very same dot instead.
+     * The cross marking an agent that is not attached, as a layer of its own so it can go over the
+     * drawing of an agent just as well as over the bundled one.
      */
     @JvmField
-    val ConnectionStatus: Icon = IconLoader.getIcon("/icons/connectionStatus.svg", RemoteAgentIcons::class.java)
+    val DisconnectedStatus: Icon = IconLoader.getIcon("/icons/disconnectedStatus.svg", RemoteAgentIcons::class.java)
+
+    /**
+     * The dot marking an agent that is waiting for an answer, drawn into the very same corner as
+     * [DisconnectedStatus] (see [AgentMark]).
+     */
+    @JvmField
+    val Notification: Icon = IconLoader.getIcon("/icons/notification.svg", RemoteAgentIcons::class.java)
 
     @JvmField
     val TokenUsage: Icon = IconLoader.getIcon("/icons/tokenUsage.svg", RemoteAgentIcons::class.java)
@@ -74,8 +110,8 @@ object RemoteAgentIcons {
      *
      * The icon measures [SIZE] like every bundled one, but the drawing itself is scaled into
      * [AGENT_SIZE] and sits in the lower left corner of that box: the bundled pair paints its own
-     * frame with a margin of the same kind, and the corner it leaves free is where the connection
-     * dot goes (see [connection]).
+     * frame with a margin of the same kind, and the corner it leaves free is where the mark of the
+     * agent goes (see [agentIcon]).
      */
     fun agent(svg: String?): Icon? {
         val markup = svg?.takeIf { it.isNotBlank() } ?: return null
@@ -86,22 +122,33 @@ object RemoteAgentIcons {
     }
 
     /**
-     * Icon of the connect / disconnect button: the agent, with the connection dot over it while
-     * the session is up. Without a drawing of its own the bundled pair is used, which carries the
-     * very same dot.
+     * Icon of a tab's agent: the drawing it brought along — the bundled [Disconnected] without one
+     * — carrying [mark] in the corner that drawing leaves free.
      *
-     * The agent drawing carries the [SIZE] box of the bundled icons in both states (see [agent]),
-     * so the button neither resizes itself when another agent is picked nor moves the drawing when
-     * the session comes up: connecting only adds the dot into the corner the drawing leaves free.
+     * The agent drawing carries the [SIZE] box of the bundled icon whatever the mark is (see
+     * [agent]), so the chip neither resizes itself when another agent is picked nor moves the
+     * drawing when a mark comes and goes: a mark only ever occupies that free corner.
      */
-    fun connection(agentSvg: String?, connected: Boolean): Icon {
-        val agent = agent(agentSvg) ?: return if (connected) Connected else Disconnected
-        if (!connected) return agent
+    fun agentIcon(agentSvg: String?, mark: AgentMark): Icon {
+        val agent = agent(agentSvg) ?: Disconnected
+        val overlay = when (mark) {
+            AgentMark.NONE -> return agent
+            AgentMark.DISCONNECTED -> DisconnectedStatus
+            AgentMark.NOTIFICATION -> Notification
+        }
         return LayeredIcon(2).apply {
             setIcon(agent, 0)
-            setIcon(ConnectionStatus, 1)
+            setIcon(overlay, 1)
         }
     }
+
+    /**
+     * [icon] painted at [alpha] of its opacity, which is how a tab pulses its agent while a turn
+     * runs (see `RemoteAgentTabsPanel`). `1f` hands the icon back untouched, so a chip that is not
+     * pulsing paints exactly what it used to.
+     */
+    fun translucent(icon: Icon, alpha: Float): Icon =
+        if (alpha >= 1f) icon else TranslucentIcon(icon, alpha)
 
     private fun loadOrFallback(path: String, fallback: Icon): Icon {
         val icon = IconLoader.findIcon(path, RemoteAgentIcons::class.java) ?: return fallback
@@ -134,6 +181,31 @@ private class AgentImageIcon(private val svg: String) : Icon {
             graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
             graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
             graphics.drawImage(image, x, y + (box - drawn), drawn, drawn, c)
+        } finally {
+            graphics.dispose()
+        }
+    }
+}
+
+/**
+ * [delegate] painted at [alpha] of its opacity, which is how a chip pulses its agent while a turn
+ * runs (see [RemoteAgentIcons.translucent]).
+ *
+ * The composite is set on a copy of the graphics rather than on the one handed in: an icon paints
+ * into the graphics of whatever component asked for it, and leaving a transparent composite behind
+ * would fade everything drawn after it.
+ */
+private class TranslucentIcon(private val delegate: Icon, private val alpha: Float) : Icon {
+
+    override fun getIconWidth(): Int = delegate.iconWidth
+
+    override fun getIconHeight(): Int = delegate.iconHeight
+
+    override fun paintIcon(c: Component?, g: Graphics, x: Int, y: Int) {
+        val graphics = g.create() as Graphics2D
+        try {
+            graphics.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha.coerceIn(0f, 1f))
+            delegate.paintIcon(c, graphics, x, y)
         } finally {
             graphics.dispose()
         }

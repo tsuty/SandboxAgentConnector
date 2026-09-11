@@ -99,6 +99,7 @@
 
         <projectService serviceImplementation="com.tsuty.remoteagent.service.RemoteAgentService"/>
         <projectService serviceImplementation="com.tsuty.remoteagent.session.SessionMetadataStore"/>
+        <projectService serviceImplementation="com.tsuty.remoteagent.session.SessionLockRegistry"/>
         <projectService serviceImplementation="com.tsuty.remoteagent.vfs.AgentWorkspaceGuard"/>
 
         <!-- Locks the workspace in the IDE while the agent runs a turn; the sandbox keeps writing. -->
@@ -113,7 +114,19 @@
         <!-- Carries what an action of the tool window cannot say in place, e.g. a sandbox terminal
              that cannot be opened (see SandboxTerminal). -->
         <notificationGroup id="Remote Agent Connector" displayType="BALLOON"/>
+
+        <!-- Wipes every persisted duplicate-open lock once on project open, so a lock that
+             survived an unclean exit (crash, kill -9, ...) never blocks the next launch
+             (see RemoteAgentStartupActivity). -->
+        <postStartupActivity implementation="com.tsuty.remoteagent.session.RemoteAgentStartupActivity"/>
     </extensions>
+
+    <projectListeners>
+        <!-- Releases this window's duplicate-open locks before project close saves workspace.xml,
+             so a lock does not survive an IDE exit/restart (see RemoteAgentProjectCloseListener). -->
+        <listener class="com.tsuty.remoteagent.session.RemoteAgentProjectCloseListener"
+                   topic="com.intellij.openapi.project.ProjectManagerListener"/>
+    </projectListeners>
 
     <actions>
         <action id="com.tsuty.remoteagent.actions.SendPrompt"

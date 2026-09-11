@@ -151,10 +151,14 @@ To prevent sensitive information from being unintentionally transmitted to exter
   * `switch_mode` is an exception to the single-line rule and is displayed as a bordered block (mode transitions alter subsequent agent behavior and should not be overlooked). The header displays `{Title}  →  {Mode ID}` in bold (Mode ID is obtained from `rawInput`; if unavailable, only the title is shown), and the plan body from `content` is permanently expanded as Markdown (raw JSON of `rawInput` / `rawOutput` is not displayed).
   * `plan` updates are displayed as task list cards, updating the same card in place.
   * Auxiliary non-conversational information (session start/restoration, notifications, turn finish reasons, errors) is displayed subtly as small, muted text without borders or titles. Only errors are highlighted with red text and a warning icon.
-* **Toolbar (Two-tier Structure)**:
-  * First row left: Connection toggle (icon-only: Attach / Detach) and current session title. Left-clicking the title opens the session history popup, while right-clicking opens the `Rename` / `Delete` menu.
-  * First row right: `New Session` (clears the transcript and starts a new session).
-  * Second row: Connection status (`Disconnected` / `Connecting` / `Ready` / `Error`) with transient status messages in muted text.
+* **Toolbar (Single Row)**:
+  * Left: Connection status (`Disconnected` / `Connecting` / `Ready` / `Error`) with transient status messages in muted text.
+  * Right: `New Session` (clears the transcript and starts a new session).
+  * Neither the agent icon nor the session title is repeated here: both belong to the tab this panel is shown in (Ph2 §4). The tab carries the agent (icon-only, the selected agent's drawing), because the connection is per tab (one sandbox process per session, Ph2 §2) — every tab shows its own state. Only the *missing* connection is marked (`disconnectedStatus.svg` over the drawing): a tab attaches itself when it is opened, so being connected is the normal state and clicking the icon of a tab that is not attached connects it. There is no detach action — closing the tab is what ends a session's process (Ph2 §4.5). The tab also names the session, where left-clicking it opens the session history popup and right-clicking opens the `Rename` / `Delete` menu of the session currently open in that tab.
+  * Everything on a tab except its close button acts on the *active* tab only: on any other tab the same click just brings it to the front (its dropdown caret is hidden accordingly), so switching tabs can never open a popup or connect by accident. Closing works on any tab, active or not.
+  * The agent icon of a tab is also where that tab reports itself while the user is looking at another one, since every tab stays live in the background (Ph2 §2):
+    * **Permission requested**: `notification.svg` is layered over the drawing while the agent of that tab waits for an answer nobody has given yet, and it shares the one free corner with the disconnected mark (not attached outranks waiting). It is shown only on tabs that are not in front — the active tab shows the permission card itself — and it goes away as soon as the request is answered, auto-allowed, or lapses with the turn. A turn that merely ends is deliberately *not* notified: every tab ends its turns, so that would light the whole strip up.
+    * **Turn running**: the agent icon pulses (its opacity breathes between full and 0.35 over a second) while a turn of that tab runs, so a working tab is told apart from an idle one at a glance.
   * No `Clear` button is provided. Transcripts belong to sessions and are cleared only when creating or switching sessions.
 * **Prompt Action Bar (Below Input Area)**: From left: `Attach File` / `Attach Selection` / Mode / Model; on the right: Token usage / `Send`.
   * Mode / Model are populated from `modes` / `models` returned by `session/new`, presented as flat popup selectors (hidden while the agent reports none). Selection dispatches `session/set_mode` / `session/set_model`, or `session/set_config_option` if reported via `configOptions`.
@@ -193,7 +197,7 @@ To prevent sensitive information from being unintentionally transmitted to exter
 ### 4.3. Session Management (History, Restoration, and Persistence)
 Sessions are managed across two layers: the agent-side context and the IDE-side visual state (transcript). Even if the agent does not retain history, the IDE visual history can still be restored.
 
-* **Session Listing**: For agents supporting `sessionCapabilities.list`, the session list is retrieved via `session/list` and shown in a history popup when clicking the session title.
+* **Session Listing**: For agents supporting `sessionCapabilities.list`, the session list is retrieved via `session/list` and shown in a history popup when clicking the session title on a tab. The selected session is restored into that very tab (each tab owns its own connection, Ph2 §2). Entries are ordered by last update, newest first, and the popup is at most 20 rows tall and at most as wide as the plugin panel; older sessions are reached by scrolling rather than being dropped from the list, and titles that do not fit the width are elided with the full one kept as the row tooltip.
 * **Restoration Strategy**: Determined by combining agent capabilities and local snapshot freshness.
 
   | Agent Capability | Local Snapshot | Behavior |

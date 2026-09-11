@@ -33,9 +33,9 @@ exist as a file under `icons/transcript/`.
 | --- | --- | --- |
 | `send.svg` | `RemoteAgentIcons.Send` — the send / stop button | yes |
 | `stop.svg` | `RemoteAgentIcons.Stop` — the same button while a turn runs | yes |
-| `connected.svg` | `RemoteAgentIcons.Connected` — connection toggle, for an agent without a drawing of its own | yes |
-| `connectionStatus.svg` | `RemoteAgentIcons.ConnectionStatus` — the dot of `connected.svg` as a layer of its own, painted over the drawing of the agent (see §4) | yes |
-| `disconnected.svg` | `RemoteAgentIcons.Disconnected` — the same toggle | yes |
+| `disconnected.svg` | `RemoteAgentIcons.Disconnected` — a tab's agent, for one without a drawing of its own | yes |
+| `disconnectedStatus.svg` | `RemoteAgentIcons.DisconnectedStatus` — the mark of an agent that is not attached, as a layer of its own, painted over the drawing of the agent (see §4) | no (one red for both themes) |
+| `notification.svg` | `RemoteAgentIcons.Notification` — the mark of an agent waiting for an answer, as a layer of its own, sharing the corner of `disconnectedStatus.svg` (see §4) | no (one blue for both themes) |
 | `tokenUsage.svg` | `RemoteAgentIcons.TokenUsage` — the usage readout | yes |
 | `console.svg` | `RemoteAgentIcons.Console`, `plugin.xml` — `Open Sandbox Terminal` | yes |
 | `settings.svg` | `RemoteAgentIcons.Settings`, `plugin.xml` — `Settings` | yes |
@@ -126,7 +126,7 @@ there is no reason to trade that away for a build step.
 
 An entry of the ACP registry ships an `icon` next to its `name` and its `distribution` (see
 `AcpAgentRegistry`), and the agent that was picked is drawn with it instead of the bundled drawing:
-the connection toggle of the toolbar, and the header of every agent block in the transcript.
+the agent of every tab chip, and the header of every agent block in the transcript.
 
 The file is downloaded once, when the agent is picked in the settings, and the markup itself is
 persisted (`RemoteAgentSettingsState.agentIconSvg`): the icon is drawn on every start of the IDE,
@@ -159,14 +159,32 @@ what the icon holds: it asks for a raster while painting, and the cache is keyed
 and color. A moved window or a switched theme renders again instead of painting the drawing that
 was made for the other one.
 
-On the Swing side the drawing replaces `connected.svg` / `disconnected.svg`, and the connection dot
-is layered over it from `connectionStatus.svg` while the session is up (`RemoteAgentIcons.connection`).
-It is fitted into the toolbar rather than painted as it comes: the icon measures 16x16 like a bundled
-one, while the drawing itself is scaled into 13x13 in its lower left corner — which is the margin the
-bundled pair paints with, and which leaves the upper right corner to the dot. Both states place it
-identically, so connecting only adds the dot instead of moving or resizing anything. The raster is
-asked for the pixels of the current scale and painted into that box, because an icon reporting the
-device pixels as its own size (`JBImageIcon`) shows up twice as large on a HiDPI screen.
+On the Swing side the drawing replaces `disconnected.svg`, and what the state of a tab asks to be
+marked is layered over it (`RemoteAgentIcons.agentIcon`, which takes an `AgentMark`):
+
+| `AgentMark` | Layer | When |
+| --- | --- | --- |
+| `DISCONNECTED` | `disconnectedStatus.svg` | the session of that tab is **not** up |
+| `NOTIFICATION` | `notification.svg` | the agent asked for a permission nobody has answered yet, on a tab that is not in front |
+| `NONE` | — | attached with nothing pending |
+
+The mark is on the exception rather than on the normal state: a tab attaches itself the moment it
+is opened (Ph2 §2), so being attached with nothing pending is the state to say nothing about. Both
+marks are drawn into the **same** corner and therefore share it in that order — a tab with no agent
+up cannot be waiting for an answer either.
+
+It is fitted into the chip rather than painted as it comes: the icon measures 16x16 like a bundled
+one, while the drawing itself is scaled into 13x13 in its lower left corner — which is the margin
+the bundled icon paints with, and which leaves the upper right corner to the mark. Every state
+places the drawing identically, so a mark coming or going never moves or resizes anything. The
+raster is asked for the pixels of the current scale and painted into that box, because an icon
+reporting the device pixels as its own size (`JBImageIcon`) shows up twice as large on a HiDPI
+screen.
+
+While a turn of the tab runs, the whole icon — mark included — is painted at a pulsing opacity
+(`RemoteAgentIcons.translucent`, driven by a `Timer` of the chip): a triangle wave from full down
+to 0.35 and back over a second, which reads as breathing rather than as a blinking warning. The
+composite is set on a copy of the graphics, so nothing painted after the icon fades with it.
 In the transcript it replaces the `ra-icon-agent` symbol of the sprite, so the blocks already on
 screen follow it — the host sends it as an `agent` event (see `TRANSCRIPT_WEBVIEW.md`).
 
@@ -178,7 +196,7 @@ changes: the bundled drawings and the title `Agent` stay.
 | Test | Guards |
 | --- | --- |
 | `AgentIconTest` | what is stored from the registry is a single `<svg>` of shapes: colors kept, scripts / handlers / external references gone |
-| `RemoteAgentIconsTest` | the Swing icons load, carry a geometry, and paint something once they went through the loader the IDE uses (an export with a `c2pa` provenance blob renders as an empty image); the drawing of an agent measures like a bundled icon and keeps that size in both connection states; a drawing without a color of its own is painted in the theme grey instead of black, and one with colors keeps them |
+| `RemoteAgentIconsTest` | the Swing icons load, carry a geometry, and paint something once they went through the loader the IDE uses (an export with a `c2pa` provenance blob renders as an empty image); the drawing of an agent measures like a bundled icon and keeps that size whatever it is marked with; both marks are drawn into the same corner, and the pulse of a running turn changes nothing but the opacity; a drawing without a color of its own is painted in the theme grey instead of black, and one with colors keeps them |
 | `TranscriptIconsTest` | every icon name the document uses has a file, every `ToolKind` has one, and the sprite is normalized (no `id`, no color literal, one `<symbol>` per file) |
 | `TranscriptProtocolTest` | the built document contains the sprite, the style sheet and the script |
 

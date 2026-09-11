@@ -13,6 +13,7 @@ import com.intellij.ui.popup.list.ListPopupImpl
 import com.intellij.util.ui.StatusText
 import com.tsuty.remoteagent.acp.SessionListEntry
 import com.tsuty.remoteagent.service.RemoteAgentService
+import java.awt.Container
 import java.awt.Point
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -79,13 +80,35 @@ class SessionHistoryPopupStep(
 }
 
 /**
- * History dropdown of the toolbar session title, following the same "click the label, get a list
- * popup" pattern as [AttachFilePopup].
+ * History dropdown of a tab's session title (`RemoteAgentTabsPanel.TabChip`), following the same
+ * "click the label, get a list popup" pattern as [AttachFilePopup].
+ *
+ * The picked session is restored into the very tab the dropdown was opened from: the service it is
+ * shown for is the one of that tab, not a shared one (Ph2 §2 — one service, and one sandbox
+ * process, per tab).
  *
  * `Rename` / `Delete` live on the right click of a row instead of a management screen of their
  * own: both act on a single session, so the list the user already picks from is the place to act.
  */
 object SessionHistoryPopup {
+
+    /**
+     * Rows the dropdown is at most tall; everything beyond is scrolled to.
+     *
+     * The history only ever grows, so an unbounded list ends up spanning the whole screen and
+     * turns the recent sessions — the ones actually picked — into a needle in a haystack. No entry
+     * is dropped from the list: it is the height that is capped, not the number of sessions.
+     */
+    private const val MAX_VISIBLE_ROWS = 20
+
+    /**
+     * Width the dropdown never goes below, even in a tool window narrower than this.
+     *
+     * The plugin panel can be dragged down to a few dozen pixels, and clamping the list to that
+     * would leave the titles unreadable, so the panel is the cap only while it is wide enough to
+     * read a row in.
+     */
+    private const val MIN_WIDTH = 160
 
     fun show(anchor: JComponent, project: Project, service: RemoteAgentService) {
         // The popup shows the list the service already holds and refreshes it in the background,
@@ -94,8 +117,47 @@ object SessionHistoryPopup {
         val entries = service.sessions.sortedByDescending { it.lastUpdatedMillis ?: 0 }
         val step = SessionHistoryPopupStep(entries, onSelect = { service.selectSession(it) })
         val popup = JBPopupFactory.getInstance().createListPopup(step)
-        (popup as? ListPopupImpl)?.list?.let { installRowActions(it, popup, anchor, project, service, entries) }
+        (popup as? ListPopupImpl)?.let { listPopup ->
+            listPopup.setMaxRowCount(MAX_VISIBLE_ROWS)
+            listPopup.list?.let { list ->
+                clampWidth(list, pluginPanelWidth(anchor))
+                installRowActions(list, popup, anchor, project, service, entries)
+            }
+        }
         popup.showUnderneathOf(anchor)
+    }
+
+    /**
+     * Caps the list at the width of the plugin panel: a single long session title would otherwise
+     * blow the dropdown up across the editor, far past the panel it belongs to.
+     *
+     * The cap is applied as the fixed cell width, which is what a [JList] derives its preferred
+     * width from; titles that do not fit are elided by the row renderer, and the full one stays
+     * available as the row tooltip ([SessionHistoryPopupStep.getTooltipTextFor]).
+     */
+    private fun clampWidth(list: JList<*>, panelWidth: Int) {
+        val width = cellWidthFor(list.preferredSize.width, panelWidth) ?: return
+        list.fixedCellWidth = width
+    }
+
+    /** The width to force on a row, or `null` when the list already fits the panel. */
+    internal fun cellWidthFor(naturalWidth: Int, panelWidth: Int): Int? {
+        if (panelWidth <= 0) return null
+        val limit = maxOf(panelWidth, MIN_WIDTH)
+        return limit.takeIf { naturalWidth > it }
+    }
+
+    /**
+     * Width of the tool window content the [anchor] sits in, or `0` when it is not shown in one
+     * (which leaves the dropdown at its natural width).
+     */
+    private fun pluginPanelWidth(anchor: JComponent): Int {
+        var component: Container? = anchor
+        while (component != null) {
+            if (component is RemoteAgentTabsPanel) return component.width
+            component = component.parent
+        }
+        return 0
     }
 
     private fun installRowActions(
@@ -137,9 +199,10 @@ object SessionHistoryPopup {
 }
 
 /**
- * `Rename` / `Delete` of one session, shared by the session dropdown and the toolbar session
- * title. `Rename` is local only (ACP has no counterpart), `Delete` asks for a confirmation and
- * always removes the local information, even when the agent cannot delete its own session.
+ * `Rename` / `Delete` of one session, shared by the rows of the session dropdown and the right
+ * click of a tab. `Rename` is local only (ACP has no counterpart), `Delete` asks for a
+ * confirmation and always removes the local information, even when the agent cannot delete its
+ * own session.
  */
 object SessionActions {
 
@@ -186,7 +249,7 @@ object SessionActions {
         JBPopupFactory.getInstance().createListPopup(step).show(RelativePoint.fromScreen(screenLocation))
     }
 
-    /** Shows the action list next to [component], used by the toolbar session title. */
+    /** Shows the action list next to [component], used by the right click of a tab. */
     fun showContextMenu(
         project: Project,
         service: RemoteAgentService,
