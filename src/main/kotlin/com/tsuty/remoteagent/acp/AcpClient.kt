@@ -334,29 +334,51 @@ class AcpClient(
         json.encodeToJsonElement(SessionCancelParams.serializer(), SessionCancelParams(sessionId)),
     )
 
-    suspend fun setMode(sessionId: String, modeId: String) {
-        request(
-            AcpMethods.SESSION_SET_MODE,
-            json.encodeToJsonElement(SessionSetModeParams.serializer(), SessionSetModeParams(sessionId, modeId)),
-        ).error?.let { throw AcpRemoteException(it) }
-    }
+    /** The answered state is what took effect, which agents may report as empty (see [reportedState]). */
+    suspend fun setMode(sessionId: String, modeId: String): SessionSetModeResult = reportedState(
+        AcpMethods.SESSION_SET_MODE,
+        SessionSetModeResult.serializer(),
+        json.encodeToJsonElement(SessionSetModeParams.serializer(), SessionSetModeParams(sessionId, modeId)),
+        SessionSetModeResult(),
+    )
 
-    suspend fun setModel(sessionId: String, modelId: String) {
-        request(
-            AcpMethods.SESSION_SET_MODEL,
-            json.encodeToJsonElement(SessionSetModelParams.serializer(), SessionSetModelParams(sessionId, modelId)),
-        ).error?.let { throw AcpRemoteException(it) }
-    }
+    suspend fun setModel(sessionId: String, modelId: String): SessionSetModelResult = reportedState(
+        AcpMethods.SESSION_SET_MODEL,
+        SessionSetModelResult.serializer(),
+        json.encodeToJsonElement(SessionSetModelParams.serializer(), SessionSetModelParams(sessionId, modelId)),
+        SessionSetModelResult(),
+    )
 
     /** Generic selector of newer agents, used for the model when `session/set_model` is absent. */
-    suspend fun setConfigOption(sessionId: String, configId: String, value: String) {
-        request(
+    suspend fun setConfigOption(sessionId: String, configId: String, value: String): SessionSetConfigOptionResult =
+        reportedState(
             AcpMethods.SESSION_SET_CONFIG_OPTION,
+            SessionSetConfigOptionResult.serializer(),
             json.encodeToJsonElement(
                 SessionSetConfigOptionParams.serializer(),
                 SessionSetConfigOptionParams(sessionId, configId, value),
             ),
-        ).error?.let { throw AcpRemoteException(it) }
+            SessionSetConfigOptionResult(),
+        )
+
+    /**
+     * Round trip of a `session/set_*` method: the answer carries the state that actually took
+     * effect, but reporting it is optional — an agent may answer with an empty result, or with
+     * none at all — so anything undecodable falls back to [fallback] instead of failing a change
+     * the agent did apply. A JSON-RPC `error` still means the change was rejected.
+     */
+    private suspend fun <T> reportedState(
+        method: String,
+        deserializer: DeserializationStrategy<T>,
+        params: JsonElement,
+        fallback: T,
+    ): T {
+        val response = request(method, params)
+        response.error?.let { throw AcpRemoteException(it) }
+        val result = response.result as? JsonObject ?: return fallback
+        return runCatching { json.decodeFromJsonElement(deserializer, result) }
+            .onFailure { log.debug("Ignoring unexpected '$method' result: $result", it) }
+            .getOrDefault(fallback)
     }
 
     /** Feeds a raw stdout chunk (possibly partial or multi-line). */

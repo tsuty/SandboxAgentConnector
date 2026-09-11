@@ -5,6 +5,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -242,6 +243,73 @@ class AcpModelsTest {
         assertEquals("default", option.currentValue)
         assertEquals(listOf("default", "sonnet"), option.choices.map { it.value })
         assertEquals("Sonnet", option.choices.last().presentableName)
+    }
+
+    @Test
+    fun `the effort option is recognised by its category and by its id`() {
+        val json = """
+            {
+              "sessionId": "sess_1",
+              "configOptions": [
+                {
+                  "id": "effort",
+                  "name": "Effort",
+                  "category": "thought_level",
+                  "currentValue": "medium",
+                  "options": [
+                    { "value": "low", "name": "Low" },
+                    { "value": "medium", "name": "Medium" }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val option = AcpJson.decodeFromString(SessionNewResult.serializer(), json).configOptions.single()
+
+        // The category and the id disagree on this one, so both spellings must name it.
+        assertTrue(option.isCategory(SessionConfigCategory.THOUGHT_LEVEL, SessionConfigCategory.EFFORT))
+        assertTrue(
+            SessionConfigOption(id = "effort").isCategory(
+                SessionConfigCategory.THOUGHT_LEVEL,
+                SessionConfigCategory.EFFORT,
+            ),
+        )
+        assertEquals(listOf("low", "medium"), option.choices.map { it.value })
+        assertEquals("medium", option.currentValue)
+    }
+
+    @Test
+    fun `an option without a well known category keeps its choices`() {
+        // `fast` shares the generic `model_config` category with any future option, so nothing
+        // but its own choices can drive it (see `RemoteAgentMainPanel.populateExtraConfigOptions`).
+        val json = """
+            {
+              "sessionId": "sess_1",
+              "configOptions": [
+                {
+                  "id": "fast",
+                  "name": "Fast mode",
+                  "description": "Faster responses on supported models",
+                  "category": "model_config",
+                  "type": "select",
+                  "currentValue": "off",
+                  "options": [
+                    { "value": "on", "name": "On" },
+                    { "value": "off", "name": "Off" }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val option = AcpJson.decodeFromString(SessionNewResult.serializer(), json).configOptions.single()
+
+        assertFalse(option.isCategory(SessionConfigCategory.MODE, SessionConfigCategory.MODEL))
+        assertEquals("Fast mode", option.presentableName)
+        assertEquals(listOf("on", "off"), option.choices.map { it.value })
+        assertEquals(listOf("On", "Off"), option.choices.map { it.presentableName })
+        assertEquals("off", option.currentValue)
     }
 
     @Test

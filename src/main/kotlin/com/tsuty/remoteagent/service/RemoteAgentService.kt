@@ -247,8 +247,54 @@ data class SessionSelectors(
 ) {
     val isEmpty: Boolean get() = models == null && modes == null && configOptions.isEmpty()
 
+    /**
+     * Applies a reported `configOptions` state. The two sources of such a state differ in how
+     * complete they are, which is what [replace] tells apart:
+     *
+     * - [replace] `= true` for `session/new` / `session/load` / `session/resume` and the
+     *   `config_option_update` notification: these carry the **whole** state, so an option that is
+     *   not part of it does not exist for this session (the `fast` option only appears on the
+     *   models that support it) and its selector has to go away.
+     * - [replace] `= false` for the answer of `session/set_config_option`, which is **partial**:
+     *   it reports `mode` and `model` but never `effort` / `fast`, so an option missing from
+     *   [reported] keeps the state it had instead of vanishing from the action bar.
+     */
+    fun withConfigOptions(reported: List<SessionConfigOption>, replace: Boolean): SessionSelectors {
+        if (reported.isEmpty()) return this
+        if (replace) return copy(configOptions = reported)
+        val byId = reported.associateBy { it.id }
+        val merged = configOptions.map { byId[it.id] ?: it } +
+            reported.filter { option -> configOptions.none { it.id == option.id } }
+        return copy(configOptions = merged)
+    }
+
+    fun withModels(reported: SessionModelState?): SessionSelectors =
+        if (reported == null) this else copy(models = reported)
+
+    fun withModes(reported: SessionModeState?): SessionSelectors =
+        if (reported == null) this else copy(modes = reported)
+
+    /** Records the model that took effect without touching the list of available ones. */
+    fun withCurrentModel(modelId: String): SessionSelectors =
+        if (models == null) this else copy(models = models.copy(currentModelId = modelId))
+
+    fun withCurrentMode(modeId: String): SessionSelectors =
+        if (modes == null) this else copy(modes = modes.copy(currentModeId = modeId))
+
+    /** `id=value` of every selector, so the `idea.log` trail shows what actually took effect. */
+    fun presentableState(): String = (
+        listOfNotNull(
+            models?.currentModelId?.let { "model=$it" },
+            modes?.currentModeId?.let { "mode=$it" },
+        ) + configOptions.map { "${it.id}=${it.currentValue}" }
+        ).joinToString(", ")
+
     fun toEvent(): RemoteAgentEvent.SessionSelectorsUpdated =
         RemoteAgentEvent.SessionSelectorsUpdated(models, modes, configOptions)
+
+    companion object {
+        val EMPTY: SessionSelectors = SessionSelectors(null, null, emptyList())
+    }
 }
 
 /**
@@ -1119,8 +1165,11 @@ class RemoteAgentService(private val project: Project) : Disposable {
         val acpClient = client ?: return@launch
         val sessionId = sessionIdRef.get() ?: return@launch
         try {
-            acpClient.setMode(sessionId, modeId)
-            publish(RemoteAgentEvent.ModeChanged(modeId))
+            // The answer is the state that took effect; agents that report none leave `modeId`.
+            val reported = acpClient.setMode(sessionId, modeId).modes
+            val merged = mergeSelectors { it.withModes(reported).withCurrentMode(modeId) }
+            if (reported != null) publish(merged.toEvent())
+            publish(RemoteAgentEvent.ModeChanged(reported?.currentModeId ?: modeId))
         } catch (e: Exception) {
             publish(RemoteAgentEvent.Error(e.message ?: "session/set_mode failed", e))
         }
@@ -1130,8 +1179,10 @@ class RemoteAgentService(private val project: Project) : Disposable {
         val acpClient = client ?: return@launch
         val sessionId = sessionIdRef.get() ?: return@launch
         try {
-            acpClient.setModel(sessionId, modelId)
-            publish(RemoteAgentEvent.ModelChanged(modelId))
+            val reported = acpClient.setModel(sessionId, modelId).models
+            val merged = mergeSelectors { it.withModels(reported).withCurrentModel(modelId) }
+            if (reported != null) publish(merged.toEvent())
+            publish(RemoteAgentEvent.ModelChanged(reported?.currentModelId ?: modelId))
         } catch (e: Exception) {
             publish(RemoteAgentEvent.Error(e.message ?: "session/set_model failed", e))
         }
@@ -1145,10 +1196,38 @@ class RemoteAgentService(private val project: Project) : Disposable {
         val acpClient = client ?: return@launch
         val sessionId = sessionIdRef.get() ?: return@launch
         try {
-            acpClient.setConfigOption(sessionId, configId, value)
+            // The agent may reject or coerce the value (`auto` → `acceptEdits`), so the answered
+            // state — not `value` — is what the selectors are refreshed from.
+            val reported = acpClient.setConfigOption(sessionId, configId, value).configOptions
+            if (reported.none { it.id == configId }) {
+                // Nothing says whether the change took effect: the selector keeps showing `value`.
+                log.debug("session/set_config_option did not report '$configId' back; assuming '$value' took effect")
+            }
+            applyConfigOptions(reported, replace = false)
         } catch (e: Exception) {
             publish(RemoteAgentEvent.Error(e.message ?: "session/set_config_option failed", e))
         }
+    }
+
+    /**
+     * Single place a reported `configOptions` state reaches both the cache and the UI; [replace]
+     * tells a whole state from a partial answer (see [SessionSelectors.withConfigOptions]).
+     */
+    private fun applyConfigOptions(reported: List<SessionConfigOption>, replace: Boolean) {
+        if (reported.isEmpty()) return
+        val merged = mergeSelectors { it.withConfigOptions(reported, replace) }
+        publish(RemoteAgentEvent.ConfigOptionsChanged(merged.configOptions))
+    }
+
+    /**
+     * Folds a reported selector state into the cached one, so a tab switch or a `session/resume`
+     * re-publishes the state that took effect instead of the one the session started with.
+     */
+    private fun mergeSelectors(transform: (SessionSelectors) -> SessionSelectors): SessionSelectors {
+        val merged = transform(selectorsRef.get() ?: SessionSelectors.EMPTY)
+        selectorsRef.set(merged)
+        log.debug("Selector state applied: ${merged.presentableState()}")
+        return merged
     }
 
     /** Tears the session down in the background; returns immediately. */
@@ -1236,9 +1315,19 @@ class RemoteAgentService(private val project: Project) : Disposable {
             is PlanUpdate -> publish(RemoteAgentEvent.PlanUpdated(update.entries))
             // Agents spell the switched mode as `currentModeId` or as `modeId`; a notification
             // that names neither says nothing worth publishing.
-            is CurrentModeUpdate -> update.modeId?.let { publish(RemoteAgentEvent.ModeChanged(it)) }
-            is CurrentModelUpdate -> publish(RemoteAgentEvent.ModelChanged(update.currentModelId))
-            is ConfigOptionUpdate -> publish(RemoteAgentEvent.ConfigOptionsChanged(update.configOptions))
+            // The cache is folded along, so a tab switch or a `session/resume` does not restore
+            // the value the session started with (see [mergeSelectors]).
+            is CurrentModeUpdate -> update.modeId?.let {
+                mergeSelectors { selectors -> selectors.withCurrentMode(it) }
+                publish(RemoteAgentEvent.ModeChanged(it))
+            }
+            is CurrentModelUpdate -> {
+                mergeSelectors { it.withCurrentModel(update.currentModelId) }
+                publish(RemoteAgentEvent.ModelChanged(update.currentModelId))
+            }
+            // A notification carries the whole selector state, so an option it stops reporting is
+            // gone for this session (see [SessionSelectors.withConfigOptions]).
+            is ConfigOptionUpdate -> applyConfigOptions(update.configOptions, replace = true)
             is AvailableCommandsUpdate -> {
                 commandsRef.set(update.availableCommands)
                 log.debug("available_commands_update: ${update.availableCommands.size} commands")

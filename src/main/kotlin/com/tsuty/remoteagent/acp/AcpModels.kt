@@ -661,13 +661,22 @@ data class SessionConfigOption(
 
     val choices: List<SessionConfigChoice> get() = options.flatMap { it.leaves() }
 
-    /** `category` is advisory, so the well known ids are accepted as a fallback. */
-    fun isCategory(expected: String): Boolean = category == expected || (category == null && id == expected)
+    /**
+     * `category` is advisory, so the well known ids are accepted as a fallback. Several spellings
+     * are accepted for one selector because the category and the id disagree on some of them:
+     * the reasoning budget is reported as `category = thought_level` with `id = effort`.
+     */
+    fun isCategory(vararg expected: String): Boolean =
+        category in expected || (category == null && id in expected)
 }
 
 object SessionConfigCategory {
     const val MODE = "mode"
     const val MODEL = "model"
+
+    /** Reasoning budget of the agent; `id = effort` is the fallback spelling (see [SessionConfigOption.isCategory]). */
+    const val THOUGHT_LEVEL = "thought_level"
+    const val EFFORT = "effort"
 }
 
 @Serializable
@@ -766,6 +775,31 @@ data class SessionSetConfigOptionParams(
     val sessionId: String,
     val configId: String,
     val value: String,
+)
+
+/**
+ * `session/set_mode` answers with the mode state that actually took effect; agents that report
+ * nothing at all answer with an empty result.
+ */
+@Serializable
+data class SessionSetModeResult(
+    val modes: SessionModeState? = null,
+)
+
+/** `session/set_model` answers with the model state that actually took effect, if with anything. */
+@Serializable
+data class SessionSetModelResult(
+    val models: SessionModelState? = null,
+)
+
+/**
+ * `session/set_config_option` answers with the **full** selector state after the change: the
+ * agent may reject or coerce the requested value (e.g. `auto` → `acceptEdits`), so this — not the
+ * value that was sent — is the state the UI must show.
+ */
+@Serializable
+data class SessionSetConfigOptionResult(
+    val configOptions: List<SessionConfigOption> = emptyList(),
 )
 
 // ---------------------------------------------------------------------------------------------

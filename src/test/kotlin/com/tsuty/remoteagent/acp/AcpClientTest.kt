@@ -98,6 +98,63 @@ class AcpClientTest {
     }
 
     @Test
+    fun `set config option answers with the state that took effect`() = runBlocking {
+        val sent = mutableListOf<String>()
+        val client = AcpClient(writeLine = { sent += it })
+
+        val deferred = async { client.setConfigOption("sess_1", "mode", "auto") }
+        val request = awaitRequest(sent)
+        assertEquals(AcpMethods.SESSION_SET_CONFIG_OPTION, request.method)
+        assertEquals("auto", request.params!!.jsonObject["value"]!!.jsonPrimitive.content)
+
+        client.handleStdoutChunk(
+            """{"jsonrpc":"2.0","id":${request.id.content},"result":{"configOptions":[""" +
+                """{"id":"mode","category":"mode","currentValue":"acceptEdits"}]}}""" + "\n",
+        )
+
+        // The agent coerced `auto` to `acceptEdits`: the answer, not the request, is the state.
+        val option = withTimeout(2_000) { deferred.await() }.configOptions.single()
+        assertEquals("mode", option.id)
+        assertEquals("acceptEdits", option.currentValue)
+    }
+
+    @Test
+    fun `a set config option error is raised as an exception`() = runBlocking {
+        val sent = mutableListOf<String>()
+        val client = AcpClient(writeLine = { sent += it })
+
+        val deferred = async { runCatching { client.setConfigOption("sess_1", "mode", "auto") } }
+        val request = awaitRequest(sent)
+        client.handleStdoutChunk(
+            """{"jsonrpc":"2.0","id":${request.id.content},"error":{"code":-32602,"message":"unknown option"}}""" + "\n",
+        )
+
+        val failure = withTimeout(2_000) { deferred.await() }.exceptionOrNull()
+        assertEquals(-32602, assertIs<AcpRemoteException>(failure).error.code)
+    }
+
+    @Test
+    fun `set mode and set model tolerate an unreported state`() = runBlocking {
+        val sent = mutableListOf<String>()
+        val client = AcpClient(writeLine = { sent += it })
+
+        val mode = async { client.setMode("sess_1", "plan") }
+        val modeRequest = awaitRequest(sent)
+        assertEquals(AcpMethods.SESSION_SET_MODE, modeRequest.method)
+        client.handleStdoutChunk("""{"jsonrpc":"2.0","id":${modeRequest.id.content},"result":{}}""" + "\n")
+        assertNull(withTimeout(2_000) { mode.await() }.modes)
+
+        sent.clear()
+        val model = async { client.setModel("sess_1", "sonnet") }
+        val modelRequest = awaitRequest(sent)
+        assertEquals(AcpMethods.SESSION_SET_MODEL, modelRequest.method)
+        client.handleStdoutChunk(
+            """{"jsonrpc":"2.0","id":${modelRequest.id.content},"result":{"models":{"currentModelId":"haiku"}}}""" + "\n",
+        )
+        assertEquals("haiku", withTimeout(2_000) { model.await() }.models?.currentModelId)
+    }
+
+    @Test
     fun `remote errors are raised as exceptions`() = runBlocking {
         val sent = mutableListOf<String>()
         val client = AcpClient(writeLine = { sent += it })

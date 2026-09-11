@@ -111,11 +111,43 @@ class RemoteAgentMainPanel(
     ).apply { isVisible = false }
 
     /**
+     * Reasoning budget of the agent (`effort`), which only exists as a generic `configOptions`
+     * selector — there is no dedicated ACP method for it, so agents that do not report it simply
+     * leave this picker hidden.
+     */
+    private val effortSelector = FlatSelector<SelectorItem>(
+        tooltip = "Effort",
+        presentation = { it.label },
+        onSelect = { applyEffort(it.id) },
+        description = { it.description },
+    ).apply { isVisible = false }
+
+    /**
      * `configId` of the `configOptions` selector backing the model / mode picker. Agents that
      * report these through `configOptions` do not implement `session/set_model` / `session/set_mode`.
      */
     private var modelConfigId: String? = null
     private var modeConfigId: String? = null
+
+    /** `configId` of the effort selector; `null` while the session reports no such option. */
+    private var effortConfigId: String? = null
+
+    /**
+     * Left half of the prompt action bar. It is a field because the selectors of the
+     * `configOptions` this panel knows nothing about are added to it while a session runs (see
+     * [populateExtraConfigOptions]).
+     */
+    private val actionBarLeft = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(ACTION_BAR_GAP), JBUI.scale(2))).apply {
+        isOpaque = false
+    }
+
+    /**
+     * Selectors drawn for the remaining `configOptions`, by `configId`. Agents report options this
+     * panel has no fixed slot for (`fast`, ...), and reporting them is model dependent, so they
+     * come and go with the state of the session instead of existing from the start.
+     */
+    private val extraSelectors = linkedMapOf<String, FlatSelector<SelectorItem>>()
+
     private val sendStopButton = FlatIconButton(RemoteAgentIcons.Send, "Send prompt") { onSendStop() }
     // Display only: kept enabled so Swing keeps delivering mouse events and shows the tooltip
     // (disabled components never get one), the click itself does nothing.
@@ -259,9 +291,12 @@ class RemoteAgentMainPanel(
     }
 
     /**
-     * Prompt action bar: `{Attach File} {Attach Selection} {Mode} {Model}` left aligned and
+     * Prompt action bar: `{Attach File} {Attach Selection} {Mode} {Model} {Effort}` left aligned and
      * `{Send}` pushed to the right. Every control is flat and icon driven; the labels of the
      * icon buttons are only exposed as tooltips.
+     *
+     * The slots above are the fixed ones; every other selector the agent reports is appended
+     * after them while a session runs (see [populateExtraConfigOptions]).
      */
     private fun actionBar(): JPanel {
         lateinit var attachFile: FlatIconButton
@@ -272,12 +307,11 @@ class RemoteAgentMainPanel(
             if (!chips.attachSelection()) chatLog.appendSystemMessage("Nothing is selected in the editor")
         }
 
-        val left = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(ACTION_BAR_GAP), JBUI.scale(2)))
-        left.isOpaque = false
-        left.add(attachFile)
-        left.add(attachSelection)
-        left.add(modeSelector)
-        left.add(modelSelector)
+        actionBarLeft.add(attachFile)
+        actionBarLeft.add(attachSelection)
+        actionBarLeft.add(modeSelector)
+        actionBarLeft.add(modelSelector)
+        actionBarLeft.add(effortSelector)
 
         val right = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(ACTION_BAR_GAP), JBUI.scale(2)))
         right.isOpaque = false
@@ -289,7 +323,7 @@ class RemoteAgentMainPanel(
         // FlowLayout already contributes ACTION_BAR_GAP on the outer sides, so only the remainder
         // is added here to reach CONTENT_MARGIN from the tool window edges.
         bar.border = JBUI.Borders.empty(0, CONTENT_MARGIN - ACTION_BAR_GAP)
-        bar.add(left, BorderLayout.WEST)
+        bar.add(actionBarLeft, BorderLayout.WEST)
         bar.add(right, BorderLayout.EAST)
         return bar
     }
@@ -469,7 +503,7 @@ class RemoteAgentMainPanel(
 
     /**
      * Fills the selectors from the generic `configOptions` state, which is how newer agents (e.g.
-     * the Claude ACP agent) report the model and the permission mode.
+     * the Claude ACP agent) report the model, the permission mode and the reasoning budget.
      */
     private fun populateConfigOptions(configOptions: List<SessionConfigOption>) {
         configOptions.firstOrNull { it.isCategory(SessionConfigCategory.MODEL) }?.let { option ->
@@ -479,6 +513,47 @@ class RemoteAgentMainPanel(
         configOptions.firstOrNull { it.isCategory(SessionConfigCategory.MODE) }?.let { option ->
             modeConfigId = option.id
             fill(modeSelector, option)
+        }
+        // Unlike the two above, the effort selector has no dedicated state to fall back on, so an
+        // option that is not reported (any more) empties it instead of keeping stale choices —
+        // which is also how it is reset between sessions (see [populateSelectors]).
+        val effort = configOptions.firstOrNull {
+            it.isCategory(SessionConfigCategory.THOUGHT_LEVEL, SessionConfigCategory.EFFORT)
+        }
+        effortConfigId = effort?.id
+        if (effort != null) fill(effortSelector, effort) else effortSelector.setItems(emptyList(), null)
+        val known = setOfNotNull(modelConfigId, modeConfigId, effortConfigId)
+        populateExtraConfigOptions(configOptions.filterNot { it.id in known })
+    }
+
+    /**
+     * Draws a selector for every reported option that has no fixed slot, so an option this panel
+     * knows nothing about is still offered instead of being silently dropped — and a future one
+     * needs no code at all. Whether an option exists depends on the model (`fast` is only reported
+     * by the models supporting it), so an option that is no longer reported loses its selector.
+     */
+    private fun populateExtraConfigOptions(options: List<SessionConfigOption>) {
+        // An option without choices has nothing to pick from: its selector would only ever be
+        // hidden (see [FlatSelector.setItems]).
+        val selectable = options.filter { it.choices.isNotEmpty() }
+        val reported = selectable.map { it.id }.toSet()
+        val stale = extraSelectors.keys - reported
+        stale.forEach { configId -> extraSelectors.remove(configId)?.let { actionBarLeft.remove(it) } }
+        selectable.forEach { option ->
+            val selector = extraSelectors.getOrPut(option.id) {
+                FlatSelector<SelectorItem>(
+                    tooltip = option.presentableName,
+                    presentation = { it.label },
+                    onSelect = { service.setConfigOption(option.id, it.id) },
+                    description = { it.description },
+                ).also { actionBarLeft.add(it) }
+            }
+            fill(selector, option)
+        }
+        // Removing a component schedules no layout on its own, unlike `FlatSelector.setItems`.
+        if (stale.isNotEmpty()) {
+            actionBarLeft.revalidate()
+            actionBarLeft.repaint()
         }
     }
 
@@ -497,6 +572,12 @@ class RemoteAgentMainPanel(
     private fun applyMode(modeId: String) {
         val configId = modeConfigId
         if (configId != null) service.setConfigOption(configId, modeId) else service.selectMode(modeId)
+    }
+
+    /** The effort is a `configOptions` selector only, so without its `configId` there is nothing to send. */
+    private fun applyEffort(value: String) {
+        val configId = effortConfigId ?: return
+        service.setConfigOption(configId, value)
     }
 
     /**
@@ -571,6 +652,8 @@ class RemoteAgentMainPanel(
         if (!connected) {
             modelSelector.isVisible = false
             modeSelector.isVisible = false
+            effortSelector.isVisible = false
+            extraSelectors.values.forEach { it.isVisible = false }
             // The commands belong to the session that just went away.
             promptInput.setAvailableCommands(emptyList())
         }
