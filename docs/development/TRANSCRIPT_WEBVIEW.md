@@ -53,7 +53,7 @@ adapter has to be rewritten.
 
 ```text
                       +---------------------------- host (IntelliJ) -----------------------------+
- RemoteAgentService -> | RemoteAgentMainPanel -> TranscriptPanel -> TranscriptView               |
+ SandboxAgentService -> | SandboxAgentMainPanel -> TranscriptPanel -> TranscriptView               |
    (ACP events)        |                                              |  JcefTranscriptView (OSR)|
                        |                                              |  PlainTextTranscriptView |
                        +--------------------------------|-------------------------|--------------+
@@ -65,7 +65,7 @@ adapter has to be rewritten.
 ```
 
 ```text
-src/main/kotlin/com/tsuty/remoteagent/ui/transcript/
+src/main/kotlin/com/tsuty/sandboxagent/ui/transcript/
     TranscriptEvent.kt          host -> web protocol (@Serializable, host independent)
     TranscriptAction.kt         web -> host protocol (@Serializable, host independent)
     TranscriptHtml.kt           Markdown -> sanitized HTML (pure, unit tested)
@@ -77,7 +77,7 @@ src/main/kotlin/com/tsuty/remoteagent/ui/transcript/
     JcefTranscriptView.kt       JBCefBrowser + JBCefJSQuery bridge (IDE only)
     PlainTextTranscriptView.kt  fallback when JCEF is unavailable (IDE only)
     ThemeTokens.kt              IDE theme -> CSS custom properties (IDE only)
-    TranscriptPanel.kt          transcript facade used by RemoteAgentMainPanel (IDE only)
+    TranscriptPanel.kt          transcript facade used by SandboxAgentMainPanel (IDE only)
 src/main/resources/transcript/
     transcript.html transcript.css transcript.js
 src/main/resources/icons/transcript/
@@ -158,7 +158,7 @@ and `--ra-small-size` is `ThemeTokens.SMALL_RATIO` of it (the quiet rows: timest
 lines, captions). What has to keep its proportion to the text is stated in `em` in
 `transcript.css` — the icons (`1.25em`, 16 px at the default base size), the indent of a folded
 body and the heading sizes — while borders, radii and the paddings of a block stay in px.
-Applying the settings publishes `RemoteAgentSettingsBridge.TOPIC`, which `TranscriptPanel` answers
+Applying the settings publishes `SandboxAgentSettingsBridge.TOPIC`, which `TranscriptPanel` answers
 with a fresh `theme` event — like a look and feel change, it only resets the custom properties, so
 the scroll position and every folded entry survive.
 
@@ -256,7 +256,7 @@ forever).
   time, so it only shows `Worked`.
 * Folding an entry keeps the clicked line where it is on screen; appending keeps the transcript
   pinned to the bottom only when it already was at the bottom.
-* Sending a prompt scrolls down there first (`RemoteAgentMainPanel.submitPrompt` ->
+* Sending a prompt scrolls down there first (`SandboxAgentMainPanel.submitPrompt` ->
   `TranscriptPanel.scrollToBottom`), so a reader who had scrolled up into the history is taken to
   the turn they just started, and the pinning above follows it from there on. While there is
   anything below the viewport, a `down.svg` button floats over the bottom right corner and jumps

@@ -1,6 +1,6 @@
-# Remote Agent Connector Local Installation Guide
+# Sandbox Agent Connector Local Installation Guide
 
-This document provides step-by-step instructions for building the `RemoteAgentConnector` plugin from source and installing it into your local JetBrains IDE via "Install Plugin from Disk".
+This document provides step-by-step instructions for building the `SandboxAgentConnector` plugin from source and installing it into your local JetBrains IDE via "Install Plugin from Disk".
 
 Publishing and signing for JetBrains Marketplace (`publishPlugin` / `signPlugin`) are not performed, as they are unnecessary for local installation.
 
@@ -32,20 +32,20 @@ Run the following command in the repository root:
 Artifact:
 
 ```
-build/distributions/RemoteAgentConnector-0.1.0.zip
+build/distributions/SandboxAgentConnector-0.1.0.zip
 ```
 
 The `0.1.0` part corresponds to `pluginVersion` in `../../gradle.properties`.
 
-Internal structure of the ZIP (`unzip -l build/distributions/RemoteAgentConnector-0.1.0.zip`):
+Internal structure of the ZIP (`unzip -l build/distributions/SandboxAgentConnector-0.1.0.zip`):
 
 ```
-RemoteAgentConnector/lib/RemoteAgentConnector-0.1.0.jar
-RemoteAgentConnector/lib/kotlin-stdlib-2.4.10.jar
-RemoteAgentConnector/lib/kotlinx-serialization-core-jvm-1.7.3.jar
-RemoteAgentConnector/lib/kotlinx-serialization-json-jvm-1.7.3.jar
-RemoteAgentConnector/lib/annotations-13.0.jar
-RemoteAgentConnector/lib/RemoteAgentConnector-0.1.0-searchableOptions.jar
+SandboxAgentConnector/lib/SandboxAgentConnector-0.1.0.jar
+SandboxAgentConnector/lib/kotlin-stdlib-2.4.10.jar
+SandboxAgentConnector/lib/kotlinx-serialization-core-jvm-1.7.3.jar
+SandboxAgentConnector/lib/kotlinx-serialization-json-jvm-1.7.3.jar
+SandboxAgentConnector/lib/annotations-13.0.jar
+SandboxAgentConnector/lib/SandboxAgentConnector-0.1.0-searchableOptions.jar
 ```
 
 > The initial clean build takes about 2 minutes because `buildSearchableOptions` launches a headless IDE.
@@ -72,7 +72,7 @@ As of version 0.1.0, there are **0 compatibility issues (Compatible)** for both 
 2. Open `Settings/Preferences` (macOS: `⌘,` / Windows & Linux: `Ctrl+Alt+S`).
 3. Select `Plugins` in the left sidebar.
 4. Click the gear icon **⚙** at the top and select `Install Plugin from Disk...`.
-5. In the file chooser dialog, select `../../build/distributions/RemoteAgentConnector-0.1.0.zip`.
+5. In the file chooser dialog, select `../../build/distributions/SandboxAgentConnector-0.1.0.zip`.
    (Do not extract the ZIP file; select the ZIP file directly.)
 6. When the `Restart IDE` button appears, click it to restart the IDE.
 
@@ -83,14 +83,14 @@ As of version 0.1.0, there are **0 compatibility issues (Compatible)** for both 
 After restarting, verify the following points:
 
 1. **Tool Window**
-   - `Remote Agent` is displayed on the right sidebar of the IDE.
+   - `Sandbox Agent` is displayed on the right sidebar of the IDE.
    - Clicking it opens the tool window.
-   - If it is not displayed, you can open it via `View → Tool Windows → Remote Agent`.
+   - If it is not displayed, you can open it via `View → Tool Windows → Sandbox Agent`.
 2. **Settings Page**
-   - `Settings/Preferences → Tools → Remote Agent Connector` exists.
+   - `Settings/Preferences → Tools → Sandbox Agent Connector` exists.
    - You can configure the sandbox CLI path, agent execution command, etc.
 3. **Plugin List**
-   - `Remote Agent Connector` (version `0.1.0`) is listed and enabled under `Settings/Preferences → Plugins → Installed`.
+   - `Sandbox Agent Connector` (version `0.1.0`) is listed and enabled under `Settings/Preferences → Plugins → Installed`.
 
 ---
 
@@ -98,10 +98,10 @@ After restarting, verify the following points:
 
 ### Updating (Replacing with the same version number)
 
-If you overwrite-install a ZIP when the same plugin ID (`com.tsuty.remoteagent`) is already installed, older JAR files may remain depending on the environment.
+If you overwrite-install a ZIP when the same plugin ID (`com.tsuty.sandboxagent`) is already installed, older JAR files may remain depending on the environment.
 To ensure a clean replacement, uninstall the plugin first.
 
-1. Select `Remote Agent Connector` under `Settings → Plugins → Installed`.
+1. Select `Sandbox Agent Connector` under `Settings → Plugins → Installed`.
 2. Click the gear icon **⚙** → `Uninstall`.
 3. Restart the IDE.
 4. Install the new ZIP via `Install Plugin from Disk...` and restart the IDE again.
@@ -112,7 +112,7 @@ Update `pluginVersion` in `../../gradle.properties`, run `./gradlew clean buildP
 
 ### Uninstalling
 
-Perform only steps 1 to 3 above. Configuration values (`RemoteAgentSettingsState`) remain in the IDE's configuration directory, so they will be preserved upon reinstallation.
+Perform only steps 1 to 3 above. Configuration values (`SandboxAgentSettingsState`) remain in the IDE's configuration directory, so they will be preserved upon reinstallation.
 
 ---
 
@@ -136,13 +136,13 @@ Perform only steps 1 to 3 above. Configuration values (`RemoteAgentSettingsState
 - The target IDE build number may be older than `242`.
   Check your build number under `Help → About`. Versions `241.x` and earlier are not supported.
 - Check whether an extracted directory or a standalone JAR was selected instead of the ZIP file.
-  Make sure to select `RemoteAgentConnector-<version>.zip`.
+  Make sure to select `SandboxAgentConnector-<version>.zip`.
 
 ### Tool window is not displayed
 
 - Check whether the plugin is disabled under `Settings → Plugins → Installed`.
 - Check whether the required `Markdown` plugin is disabled; if it is, this plugin is automatically disabled as well.
-- Try opening via `View → Tool Windows → Remote Agent`.
+- Try opening via `View → Tool Windows → Sandbox Agent`.
 - If it still does not appear, check `idea.log` for exceptions (see below).
 
 ### Kotlin stdlib Exceptions (`NoSuchMethodError` / `ClassNotFoundException`, etc.)
@@ -188,7 +188,7 @@ Example paths (`<Product>` refers to the product directory such as `IntelliJIdea
 | Linux | `~/.cache/JetBrains/<Product>/log/idea.log` |
 | Windows | `%LOCALAPPDATA%\JetBrains\<Product>\log\idea.log` |
 
-Search for `com.tsuty.remoteagent` to filter stack traces originating from this plugin.
+Search for `com.tsuty.sandboxagent` to filter stack traces originating from this plugin.
 
 ### Use the Sandbox for Development Verification
 
@@ -198,7 +198,7 @@ If you want to verify behavior without modifying your main IDE environment, laun
 ./gradlew runIde
 ```
 
-The plugin is placed in `build/idea-sandbox/<ide-build>/plugins/RemoteAgentConnector/lib/`, and settings/logs are isolated under the sandbox directory (`build/idea-sandbox/<ide-build>/log/idea.log`).
+The plugin is placed in `build/idea-sandbox/<ide-build>/plugins/SandboxAgentConnector/lib/`, and settings/logs are isolated under the sandbox directory (`build/idea-sandbox/<ide-build>/log/idea.log`).
 
 ---
 
@@ -207,13 +207,13 @@ The plugin is placed in `build/idea-sandbox/<ide-build>/plugins/RemoteAgentConne
 Follow and check off each item below in order:
 
 - [ ] `./gradlew clean buildPlugin` finishes with `BUILD SUCCESSFUL`
-- [ ] `../../build/distributions/RemoteAgentConnector-0.1.0.zip` exists
+- [ ] `../../build/distributions/SandboxAgentConnector-0.1.0.zip` exists
 - [ ] Target IDE's build number in `Help → About` is `242` or later
 - [ ] The `Markdown` plugin is enabled under `Settings → Plugins` in the target IDE
 - [ ] Successfully selected the ZIP via `Settings → Plugins → ⚙ → Install Plugin from Disk...`
 - [ ] Clicked `Restart IDE` and the IDE restarted normally
-- [ ] `Remote Agent Connector 0.1.0` appears in `Settings → Plugins → Installed` in an enabled state
-- [ ] `Remote Agent` tool window appears on the right sidebar of the IDE and opens upon clicking
-- [ ] The settings page at `Settings → Tools → Remote Agent Connector` opens and values can be saved
-- [ ] `idea.log` has no ERROR / exceptions originating from `com.tsuty.remoteagent`
+- [ ] `Sandbox Agent Connector 0.1.0` appears in `Settings → Plugins → Installed` in an enabled state
+- [ ] `Sandbox Agent` tool window appears on the right sidebar of the IDE and opens upon clicking
+- [ ] The settings page at `Settings → Tools → Sandbox Agent Connector` opens and values can be saved
+- [ ] `idea.log` has no ERROR / exceptions originating from `com.tsuty.sandboxagent`
 - [ ] (Optional) Start a session with the configured agent command and receive a response

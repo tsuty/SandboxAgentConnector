@@ -10,7 +10,7 @@ The plugin paints in two completely different places, and an icon cannot serve b
 | | Swing / IDE icons | Transcript icons |
 | --- | --- | --- |
 | Where | toolbars, buttons, the tool window stripe, the plugin list | inside the JCEF document (`TRANSCRIPT_WEBVIEW.md`) |
-| Loaded by | `IconLoader` (`RemoteAgentIcons`), `plugin.xml` | the document itself, as an inlined SVG sprite |
+| Loaded by | `IconLoader` (`SandboxAgentIcons`), `plugin.xml` | the document itself, as an inlined SVG sprite |
 | Theme | two files, `x.svg` and `x_dark.svg` — `IconLoader` picks one | one file; the color comes from CSS (`currentColor`) |
 | Colors | baked into the file (`#6c707e` light, `#ced0d6` dark) | none; a color in the file is thrown away |
 | Geometry | whatever the drawing needs (`0 0 14 14`, `0 0 13.6 8.89`, …) | **square**, `0 0 16 16` |
@@ -31,15 +31,15 @@ exist as a file under `icons/transcript/`.
 
 | File | Used by | Keep? |
 | --- | --- | --- |
-| `send.svg` | `RemoteAgentIcons.Send` — the send / stop button | yes |
-| `stop.svg` | `RemoteAgentIcons.Stop` — the same button while a turn runs | yes |
-| `disconnected.svg` | `RemoteAgentIcons.Disconnected` — a tab's agent, for one without a drawing of its own | yes |
-| `disconnectedStatus.svg` | `RemoteAgentIcons.DisconnectedStatus` — the mark of an agent that is not attached, as a layer of its own, painted over the drawing of the agent (see §4) | no (one red for both themes) |
-| `notification.svg` | `RemoteAgentIcons.Notification` — the mark of an agent waiting for an answer, as a layer of its own, sharing the corner of `disconnectedStatus.svg` (see §4) | no (one blue for both themes) |
-| `tokenUsage.svg` | `RemoteAgentIcons.TokenUsage` — the usage readout | yes |
-| `console.svg` | `RemoteAgentIcons.Console`, `plugin.xml` — `Open Sandbox Terminal` | yes |
-| `settings.svg` | `RemoteAgentIcons.Settings`, `plugin.xml` — `Settings` | yes |
-| `newSession.svg` | `RemoteAgentIcons.NewSession` — `New Session` | yes |
+| `send.svg` | `SandboxAgentIcons.Send` — the send / stop button | yes |
+| `stop.svg` | `SandboxAgentIcons.Stop` — the same button while a turn runs | yes |
+| `disconnected.svg` | `SandboxAgentIcons.Disconnected` — a tab's agent, for one without a drawing of its own | yes |
+| `disconnectedStatus.svg` | `SandboxAgentIcons.DisconnectedStatus` — the mark of an agent that is not attached, as a layer of its own, painted over the drawing of the agent (see §4) | no (one red for both themes) |
+| `notification.svg` | `SandboxAgentIcons.Notification` — the mark of an agent waiting for an answer, as a layer of its own, sharing the corner of `disconnectedStatus.svg` (see §4) | no (one blue for both themes) |
+| `tokenUsage.svg` | `SandboxAgentIcons.TokenUsage` — the usage readout | yes |
+| `console.svg` | `SandboxAgentIcons.Console`, `plugin.xml` — `Open Sandbox Terminal` | yes |
+| `settings.svg` | `SandboxAgentIcons.Settings`, `plugin.xml` — `Settings` | yes |
+| `newSession.svg` | `SandboxAgentIcons.NewSession` — `New Session` | yes |
 | `toolWindowIcon.svg`, `toolWindowIcon@20x20.svg` | `plugin.xml`, the tool window stripe | yes |
 
 `src/main/resources/META-INF/pluginIcon.svg` stays where it is: the marketplace and the plugin list
@@ -129,7 +129,7 @@ An entry of the ACP registry ships an `icon` next to its `name` and its `distrib
 the agent of every tab chip, and the header of every agent block in the transcript.
 
 The file is downloaded once, when the agent is picked in the settings, and the markup itself is
-persisted (`RemoteAgentSettingsState.agentIconSvg`): the icon is drawn on every start of the IDE,
+persisted (`SandboxAgentSettingsState.agentIconSvg`): the icon is drawn on every start of the IDE,
 and reaching the CDN for it would make the toolbar depend on the network. Before it is stored it is
 cut down to its shapes (`AgentIcon.sanitize`) — scripts, event handlers and references leaving the
 file are dropped, because the markup ends up in two places that both take markup and one of them is
@@ -141,7 +141,7 @@ a `_dark` twin nor a monochrome variant to fall back on:
 | | Bundled icons | The icon of the agent |
 | --- | --- | --- |
 | Source | files of this repository | the ACP registry, stored in the settings |
-| Swing | `IconLoader`, `_dark` twin | rasterized with its own colors kept (`RemoteAgentIcons.agent`) |
+| Swing | `IconLoader`, `_dark` twin | rasterized with its own colors kept (`SandboxAgentIcons.agent`) |
 | Transcript | `<symbol>`, recolored to `currentColor` | `<symbol>`, colors kept (`TranscriptIcons.agentSymbol`) |
 
 Kept colors, however, are not the same thing as a color for everything: every entry of the registry
@@ -150,7 +150,7 @@ color of its surroundings rather than a color of its own. The transcript has the
 against the text, and the Swing side has to resolve it itself — the SVG loader of the platform
 turns `currentColor`, and any shape without a `fill`, into black, and black on the toolbar of a
 dark theme is the color of nothing: the button showed its connection dot and nothing else.
-`RemoteAgentIcons` therefore paints what the drawing left open in the grey of the bundled icons
+`SandboxAgentIcons` therefore paints what the drawing left open in the grey of the bundled icons
 (`#6c707e` light, `#ced0d6` dark) before it hands the markup to the loader, so an agent icon
 carries the weight of the icons next to it. A shape the drawing colored itself is left alone.
 
@@ -160,7 +160,7 @@ and color. A moved window or a switched theme renders again instead of painting 
 was made for the other one.
 
 On the Swing side the drawing replaces `disconnected.svg`, and what the state of a tab asks to be
-marked is layered over it (`RemoteAgentIcons.agentIcon`, which takes an `AgentMark`):
+marked is layered over it (`SandboxAgentIcons.agentIcon`, which takes an `AgentMark`):
 
 | `AgentMark` | Layer | When |
 | --- | --- | --- |
@@ -182,7 +182,7 @@ reporting the device pixels as its own size (`JBImageIcon`) shows up twice as la
 screen.
 
 While a turn of the tab runs, the whole icon — mark included — is painted at a pulsing opacity
-(`RemoteAgentIcons.translucent`, driven by a `Timer` of the chip): a triangle wave from full down
+(`SandboxAgentIcons.translucent`, driven by a `Timer` of the chip): a triangle wave from full down
 to 0.35 and back over a second, which reads as breathing rather than as a blinking warning. The
 composite is set on a copy of the graphics, so nothing painted after the icon fades with it.
 In the transcript it replaces the `ra-icon-agent` symbol of the sprite, so the blocks already on
@@ -196,7 +196,7 @@ changes: the bundled drawings and the title `Agent` stay.
 | Test | Guards |
 | --- | --- |
 | `AgentIconTest` | what is stored from the registry is a single `<svg>` of shapes: colors kept, scripts / handlers / external references gone |
-| `RemoteAgentIconsTest` | the Swing icons load, carry a geometry, and paint something once they went through the loader the IDE uses (an export with a `c2pa` provenance blob renders as an empty image); the drawing of an agent measures like a bundled icon and keeps that size whatever it is marked with; both marks are drawn into the same corner, and the pulse of a running turn changes nothing but the opacity; a drawing without a color of its own is painted in the theme grey instead of black, and one with colors keeps them |
+| `SandboxAgentIconsTest` | the Swing icons load, carry a geometry, and paint something once they went through the loader the IDE uses (an export with a `c2pa` provenance blob renders as an empty image); the drawing of an agent measures like a bundled icon and keeps that size whatever it is marked with; both marks are drawn into the same corner, and the pulse of a running turn changes nothing but the opacity; a drawing without a color of its own is painted in the theme grey instead of black, and one with colors keeps them |
 | `TranscriptIconsTest` | every icon name the document uses has a file, every `ToolKind` has one, and the sprite is normalized (no `id`, no color literal, one `<symbol>` per file) |
 | `TranscriptProtocolTest` | the built document contains the sprite, the style sheet and the script |
 

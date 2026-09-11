@@ -13,11 +13,11 @@ specification). The script therefore cannot be selected in the dialog any more.
 Run it by starting the connection with the command instead, from a debugger or a scratch:
 
 ```kotlin
-project.service<RemoteAgentService>().connect("python3 <repo>/tools/fake-acp-agent/switch_mode_agent.py")
+project.service<SandboxAgentService>().connect("python3 <repo>/tools/fake-acp-agent/switch_mode_agent.py")
 ```
 
 The sandbox still fronts it, so the sandbox named in the settings has to be running and has to see
-the script; the connection health check runs `echo remote-agent-connector` through the same sandbox
+the script; the connection health check runs `echo sandbox-agent-connector` through the same sandbox
 and only looks at the exit code, so it passes without the script being involved at all.
 
 ## What it sends

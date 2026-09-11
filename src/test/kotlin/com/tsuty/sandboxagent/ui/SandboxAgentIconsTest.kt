@@ -1,0 +1,223 @@
+package com.tsuty.sandboxagent.ui
+
+import com.intellij.ui.LayeredIcon
+import com.intellij.util.SVGLoader
+import org.junit.jupiter.api.Test
+import java.awt.image.BufferedImage
+import java.io.File
+import javax.swing.Icon
+import javax.xml.parsers.DocumentBuilderFactory
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
+
+class SandboxAgentIconsTest {
+
+    @Test
+    fun testIconsAreLoaded() {
+        assertNotNull(SandboxAgentIcons.Send)
+        assertNotNull(SandboxAgentIcons.Stop)
+        assertNotNull(SandboxAgentIcons.Disconnected)
+        assertNotNull(SandboxAgentIcons.DisconnectedStatus)
+        assertNotNull(SandboxAgentIcons.Notification)
+        assertNotNull(SandboxAgentIcons.TokenUsage)
+        assertNotNull(SandboxAgentIcons.NewSession)
+        assertNotNull(SandboxAgentIcons.Console)
+        assertNotNull(SandboxAgentIcons.Settings)
+    }
+
+    /**
+     * The icons are exported from a drawing tool, which likes to embed a huge base64 `c2pa`
+     * provenance blob into `<metadata>`. The IDE SVG loader chokes on it and the icon silently
+     * renders as nothing, so every icon has to stay a plain drawing with a geometry of its own.
+     */
+    @Test
+    fun `every icon is a plain sized svg`() {
+        val icons = swingIcons()
+        assertTrue(icons.isNotEmpty(), "no icons found")
+        icons.forEach { icon ->
+            val text = icon.readText()
+            assertTrue("c2pa" !in text, "${icon.name} still carries the exported c2pa metadata")
+            val root = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(icon).documentElement
+            val sized = root.getAttribute("viewBox").isNotBlank() ||
+                (root.getAttribute("width").isNotBlank() && root.getAttribute("height").isNotBlank())
+            assertTrue(sized, "${icon.name} has no geometry")
+        }
+    }
+
+    /**
+     * A geometry alone is not enough: a drawing the loader cannot read still yields an empty image,
+     * which reaches the toolbar as a button with nothing on it. Every icon therefore has to paint
+     * at least something once it went through the very loader the IDE uses.
+     */
+    @Test
+    fun `every icon paints something`() {
+        val icons = swingIcons()
+        assertTrue(icons.isNotEmpty(), "no icons found")
+        icons.forEach { icon ->
+            val image = icon.inputStream().use { SVGLoader.load(it, 1.0f) } as BufferedImage
+            val painted = (0 until image.width).any { x ->
+                (0 until image.height).any { y -> image.getRGB(x, y) ushr 24 != 0 }
+            }
+            assertTrue(painted, "${icon.name} renders as an empty image")
+        }
+    }
+
+    /**
+     * The drawing an agent brings along must measure like a bundled icon: it sits on a tab chip
+     * among 16x16 icons, and a raster reported at the size of the device pixels used to paint it
+     * twice as large on a HiDPI screen.
+     */
+    @Test
+    fun `the agent icon measures like a bundled one`() {
+        val expected = SandboxAgentIcons.Disconnected.iconWidth
+        val agent = assertNotNull(SandboxAgentIcons.agent(AGENT_SVG), "the agent drawing did not render")
+        assertEquals(expected, agent.iconWidth)
+        assertEquals(expected, agent.iconHeight)
+    }
+
+    /** A mark goes into the free corner; whichever it is, it must not resize the chip. */
+    @Test
+    fun `the agent icon keeps its size whatever it is marked with`() {
+        val plain = SandboxAgentIcons.agentIcon(AGENT_SVG, AgentMark.NONE)
+        assertEquals(SandboxAgentIcons.Disconnected.iconWidth, plain.iconWidth)
+        AgentMark.entries.forEach { mark ->
+            val marked = SandboxAgentIcons.agentIcon(AGENT_SVG, mark)
+            assertEquals(plain.iconWidth, marked.iconWidth, "$mark resizes the chip")
+            assertEquals(plain.iconHeight, marked.iconHeight, "$mark resizes the chip")
+        }
+    }
+
+    /** Without a drawing of its own the bundled one stays what the chip shows. */
+    @Test
+    fun `no agent drawing keeps the bundled one`() {
+        assertSame(SandboxAgentIcons.Disconnected, SandboxAgentIcons.agentIcon(null, AgentMark.NONE))
+        assertSame(SandboxAgentIcons.Disconnected, SandboxAgentIcons.agentIcon(" ", AgentMark.NONE))
+    }
+
+    /**
+     * The two marks share the one corner the drawing leaves free, so they have to be drawn into
+     * the same place: a notification dot rendered anywhere else would land on the agent itself.
+     */
+    @Test
+    fun `both marks occupy the same corner`() {
+        val disconnected = markedPixels(SandboxAgentIcons.DisconnectedStatus)
+        val notification = markedPixels(SandboxAgentIcons.Notification)
+        assertTrue(disconnected.isNotEmpty(), "the disconnected mark renders as an empty image")
+        assertTrue(notification.isNotEmpty(), "the notification mark renders as an empty image")
+        val box = SandboxAgentIcons.DisconnectedStatus.iconWidth
+        listOf("disconnected" to disconnected, "notification" to notification).forEach { (name, pixels) ->
+            assertTrue(pixels.all { (x, _) -> x > box / 2 }, "the $name mark is not on the right")
+            assertTrue(pixels.all { (_, y) -> y < box / 2 }, "the $name mark is not on the top")
+        }
+    }
+
+    /**
+     * The pulse of a running turn fades the very icon the chip already shows, so it must not
+     * change what is laid out — and a chip that is not pulsing has to get its icon back untouched.
+     */
+    @Test
+    fun `pulsing only changes the opacity`() {
+        val icon = SandboxAgentIcons.agentIcon(AGENT_SVG, AgentMark.NONE)
+        assertSame(icon, SandboxAgentIcons.translucent(icon, 1f))
+        val faded = SandboxAgentIcons.translucent(icon, 0.35f)
+        assertEquals(icon.iconWidth, faded.iconWidth)
+        assertEquals(icon.iconHeight, faded.iconHeight)
+        assertTrue(opaqueColors(faded).isEmpty(), "a faded icon still paints fully opaque pixels")
+    }
+
+    /**
+     * Being attached with nothing pending is the normal state of a tab (it connects on its own
+     * when opened), so that state carries no mark at all: the icon is the drawing itself, with
+     * nothing layered over it.
+     */
+    @Test
+    fun `only a state worth telling is marked`() {
+        val agent = assertNotNull(SandboxAgentIcons.agent(AGENT_SVG), "the agent drawing did not render")
+        assertEquals(agent::class, SandboxAgentIcons.agentIcon(AGENT_SVG, AgentMark.NONE)::class)
+        assertTrue(SandboxAgentIcons.agentIcon(AGENT_SVG, AgentMark.DISCONNECTED) is LayeredIcon)
+        assertTrue(SandboxAgentIcons.agentIcon(null, AgentMark.DISCONNECTED) is LayeredIcon)
+        assertTrue(SandboxAgentIcons.agentIcon(AGENT_SVG, AgentMark.NOTIFICATION) is LayeredIcon)
+    }
+
+    /**
+     * Every drawing of the ACP registry is monochrome and asks for `currentColor`, which the SVG
+     * loader of the platform resolves to black: the connect / disconnect button showed nothing but
+     * its status dot on a dark theme, so the color has to be resolved before the drawing is drawn.
+     */
+    @Test
+    fun `a drawing without a color of its own is not painted black`() {
+        val icon = assertNotNull(SandboxAgentIcons.agent(CURRENT_COLOR_SVG), "the agent drawing did not render")
+        val painted = opaqueColors(icon)
+        assertTrue(painted.isNotEmpty(), "the drawing renders as an empty image")
+        assertTrue(painted.none { it == BLACK }, "the drawing is painted black: $painted")
+    }
+
+    /** A shape with no `fill` at all inherits black just the same, root element included. */
+    @Test
+    fun `an uncolored shape is not painted black either`() {
+        val icon = assertNotNull(SandboxAgentIcons.agent(UNCOLORED_SVG), "the agent drawing did not render")
+        val painted = opaqueColors(icon)
+        assertTrue(painted.isNotEmpty(), "the drawing renders as an empty image")
+        assertTrue(painted.none { it == BLACK }, "the drawing is painted black: $painted")
+    }
+
+    /** What the drawing colored itself is left alone: a brand icon is recognized by its colors. */
+    @Test
+    fun `a drawing keeps the colors it brought along`() {
+        val icon = assertNotNull(SandboxAgentIcons.agent(AGENT_SVG), "the agent drawing did not render")
+        assertEquals(setOf(0xd97757), opaqueColors(icon))
+    }
+
+    /** The coordinates of every pixel the [icon] paints at all, however faintly. */
+    private fun markedPixels(icon: Icon): List<Pair<Int, Int>> {
+        val image = BufferedImage(icon.iconWidth, icon.iconHeight, BufferedImage.TYPE_INT_ARGB)
+        val graphics = image.createGraphics()
+        try {
+            icon.paintIcon(null, graphics, 0, 0)
+        } finally {
+            graphics.dispose()
+        }
+        return (0 until image.width).flatMap { x -> (0 until image.height).map { y -> x to y } }
+            .filter { (x, y) -> image.getRGB(x, y) ushr 24 != 0 }
+    }
+
+    /** The colors of the pixels the [icon] paints without any transparency. */
+    private fun opaqueColors(icon: Icon): Set<Int> {
+        val image = BufferedImage(icon.iconWidth, icon.iconHeight, BufferedImage.TYPE_INT_ARGB)
+        val graphics = image.createGraphics()
+        try {
+            icon.paintIcon(null, graphics, 0, 0)
+        } finally {
+            graphics.dispose()
+        }
+        return (0 until image.width).flatMap { x -> (0 until image.height).map { y -> image.getRGB(x, y) } }
+            .filter { it ushr 24 == 0xFF }
+            .map { it and 0xFFFFFF }
+            .toSet()
+    }
+
+    /**
+     * Only the Swing set: the icons of the transcript live in `icons/transcript/` and are checked
+     * by `TranscriptIconsTest` against rules of their own (square, one color, no `_dark` twin).
+     */
+    private fun swingIcons(): List<File> =
+        File("src/main/resources/icons").listFiles { file -> file.extension == "svg" }.orEmpty().toList()
+
+    private companion object {
+        /** Stands for what a registry entry ships: a colored drawing filling its whole view box. */
+        const val AGENT_SVG =
+            """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#d97757"/></svg>"""
+
+        /** What every entry of the registry actually ships: one shape, and no color to paint it. */
+        const val CURRENT_COLOR_SVG =
+            """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" fill="currentColor"/></svg>"""
+
+        /** The same drawing leaving the color to whatever it is painted in. */
+        const val UNCOLORED_SVG =
+            """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24"/></svg>"""
+
+        const val BLACK = 0x000000
+    }
+}

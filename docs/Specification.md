@@ -1,4 +1,4 @@
-# Remote Agent Connector - Specification & Architecture Design (Specification.md)
+# Sandbox Agent Connector - Specification & Architecture Design (Specification.md)
 
 ## 1. Overview & Background
 
@@ -76,14 +76,14 @@ This ensures versatility across alternative sandbox implementations and allows c
 * **Terminal Login**: `Open Sandbox Terminal` of the tool window options menu (§4.2) logs into the very same sandbox with `<sandbox command> exec -i -t "<sandbox name>" <login shell>` (e.g. `sbx exec -i -t "MyProject" /bin/bash -l`): the attach command with a TTY added and the configured **Login shell** (§5.1) in place of the agent command.
   * The command line is *typed into* a terminal tab of the IDE (bundled Terminal plugin) instead of being started as a process of its own: that is what gives the shell a real terminal, and the tab stays usable after the shell exits. It is written to the IDE log as well (see §6.3).
   * The Terminal plugin is an optional dependency. While it is switched off the entry stays disabled, and it reports the reason as a notification instead of failing.
-* **Liveness Probe**: Before attaching, a lightweight, environment-independent probe (`echo remote-agent-connector`) is executed in place of the agent command, evaluating reachability solely by exit code (fixed internally in the plugin, no configuration required). If the exit code is non-zero, an error is displayed instead of attaching.
+* **Liveness Probe**: Before attaching, a lightweight, environment-independent probe (`echo sandbox-agent-connector`) is executed in place of the agent command, evaluating reachability solely by exit code (fixed internally in the plugin, no configuration required). If the exit code is non-zero, an error is displayed instead of attaching.
 * **Process Control**: `GeneralCommandLine` uses the host's project root as its working directory with UTF-8 encoding. Only `stdout` is routed to the ACP parser, while `stderr` is segregated into the IDE log.
 * **Detach**: Stopping only terminates the agent process launched via Exec, leaving the sandbox container itself running.
 
 ### 3.3. Agent Communication Protocol (ACP: Agent Client Protocol v1)
 Complies with **ACP v1** based on JSON-RPC 2.0 to handle prompt exchanges, permission requests (tool execution / file modifications), and streaming notifications.
 
-* **Version Negotiation**: Sends `protocolVersion: 1` and `clientInfo` (`RemoteAgentConnector` / `1.0.0`) in `initialize`. If the agent returns less than 1, the connection is treated as an error.
+* **Version Negotiation**: Sends `protocolVersion: 1` and `clientInfo` (`SandboxAgentConnector` / `1.0.0`) in `initialize`. If the agent returns less than 1, the connection is treated as an error.
 * **Client Capabilities**: For complete sandbox containment, `fs.readTextFile`, `fs.writeTextFile`, and `terminal` are all reported as `false`.
 * **Authentication (`authenticate`)**: Assumes authentication is pre-configured when starting the sandbox; not executed by the plugin (even if `authMethods` are returned, they are only logged).
 * **MCP (`mcpServers`)**: Assumes configuration is completed on the agent side and always transmits an empty array.
@@ -167,8 +167,8 @@ To prevent sensitive information from being unintentionally transmitted to exter
   * Token usage is shown only when `usage_update` is received, formatted as a read-only icon with breakdown details on hover.
 * **Options Menu (Tool Window Header)**: The `Options` menu of the tool window (the rotated ellipsis at the left end of the header, next to platform entries such as `Show Toolbar`) carries two entries of the plugin, added through `ToolWindowEx.setAdditionalGearActions`:
   * `Open Sandbox Terminal` (`icons/console.svg`) — logs into the sandbox with the configured login shell (see §3.2).
-  * `Settings` (`icons/settings.svg`) — opens `Settings > Tools > Remote Agent Connector` directly.
-  * Both are registered as regular actions (`com.tsuty.remoteagent.actions.OpenSandboxTerminal` / `...OpenRemoteAgentSettings`), so they are reachable through Find Action and can be bound to a shortcut in Keymap.
+  * `Settings` (`icons/settings.svg`) — opens `Settings > Tools > Sandbox Agent Connector` directly.
+  * Both are registered as regular actions (`com.tsuty.sandboxagent.actions.OpenSandboxTerminal` / `...OpenSandboxAgentSettings`), so they are reachable through Find Action and can be bound to a shortcut in Keymap.
 * **Interruption**: During turn execution, the `Send` button switches to `Stop`, sending `session/cancel` upon click (not a separate button).
 * **Prompt Input Area (Key UX Requirements)**:
   * **Dynamic Height Adjustment**:
@@ -176,7 +176,7 @@ To prevent sensitive information from being unintentionally transmitted to exter
     * **Auto-Grow**: Automatically expands vertically from a minimum of ~2 lines to a maximum of ~8 lines based on input length, transitioning to internal scrolling beyond the limit.
   * **Input Component**: Uses `EditorTextField`, supporting syntax highlighting, code completion, and native JetBrains shortcuts.
   * **Send / Newline Keymaps**:
-    * No custom plugin settings; shortcuts are configured via standard IDE `Settings > Keymap` actions (`com.tsuty.remoteagent.actions.SendPrompt` = `Send Prompt` / default `Enter`, `com.tsuty.remoteagent.actions.InsertNewline` = `Insert Newline in Prompt` / default `Shift+Enter`). Users desiring Cmd/Ctrl+Enter submission can swap assignments in Keymap.
+    * No custom plugin settings; shortcuts are configured via standard IDE `Settings > Keymap` actions (`com.tsuty.sandboxagent.actions.SendPrompt` = `Send Prompt` / default `Enter`, `com.tsuty.sandboxagent.actions.InsertNewline` = `Insert Newline in Prompt` / default `Shift+Enter`). Users desiring Cmd/Ctrl+Enter submission can swap assignments in Keymap.
     * The `Send` button tooltip displays the current keybinding and tracks Keymap changes.
     * An `InputMethodListener` monitors IME composition states to prevent accidental prompt submission when pressing Enter to confirm IME conversions (e.g., Japanese input).
   * **Slash Commands**: Typing `/` at the start of a line opens a completion popup for commands reported by `available_commands_update`.
@@ -210,7 +210,7 @@ Sessions are managed across two layers: the agent-side context and the IDE-side 
   | Unsupported | Present | Renders snapshot only (visual restoration; notifies user that agent has no context) |
   | Unsupported | None | Rejects selection and retains current session |
 
-* **Transcript Snapshots**: Persists visual state (messages with merged chunks, finalized tool calls, Plans, notifications) as JSON at turn boundaries. Stored under the IDE's per-project cache directory at `remote-agent-sessions/{sessionId}.json` (outside the project tree, not tracked in VCS). Writes use atomic moves via temporary files to avoid corrupted snapshots upon interruption.
+* **Transcript Snapshots**: Persists visual state (messages with merged chunks, finalized tool calls, Plans, notifications) as JSON at turn boundaries. Stored under the IDE's per-project cache directory at `sandbox-agent-sessions/{sessionId}.json` (outside the project tree, not tracked in VCS). Writes use atomic moves via temporary files to avoid corrupted snapshots upon interruption.
 * **Schema Version**: Snapshots include `schemaVersion` (currently 1). Versions without a migration path are discarded as "no local history" (preventing load failures from breaking connections).
 * **Freshness Check**: Snapshots record save timestamps and the agent's reported last updated timestamp at that time, comparing them against `session/list` updated timestamps to decide if replay is necessary. If the agent does not report timestamps, the snapshot is used.
 * **Rename / Delete**: Since ACP lacks `session/rename`, renames are stored in `workspace.xml` as IDE-side title overrides, taking precedence over titles reported by the agent. Deletion issues `session/delete` (when supported; continues even if it fails) and always discards local snapshots and metadata.
@@ -220,7 +220,7 @@ Sessions are managed across two layers: the agent-side context and the IDE-side 
 
 ## 5. Plugin Settings
 
-Configuration items located under `Preferences / Settings > Tools > Remote Agent Connector`:
+Configuration items located under `Preferences / Settings > Tools > Sandbox Agent Connector`:
 
 | Setting Item (Property) | Type | Default Value | Description |
 | :--- | :--- | :--- | :--- |
@@ -236,10 +236,10 @@ Configuration items located under `Preferences / Settings > Tools > Remote Agent
 | **Make the workspace read-only in the IDE while a turn is running**<br>(`lockEditorsDuringTurn`) | Boolean | `true` | Whether to lock workspace files in the IDE as read-only during turns to prevent editing conflicts (see §3.1) |
 | **Transcript font size**<br>(`transcriptFontSize`) | Int (8..32) | `13` | Base font size of the transcript, in pixels. The only setting the look of the transcript has: every other size is derived from it (code blocks read at the base size, the quiet rows and tool call lines at 0.85 of it). Applying the settings takes effect at once without rebuilding the DOM, so the scroll position and every folded entry survive |
 
-Settings are maintained on a per-project basis (`projectConfigurable` / `remoteAgentConnector.xml`), allowing different sandbox configurations across projects.
+Settings are maintained on a per-project basis (`projectConfigurable` / `sandboxAgentConnector.xml`), allowing different sandbox configurations across projects.
 
 The following are not managed in plugin settings:
-* **Send Keybinding**: Configured via IDE standard `Settings > Keymap` for `Send Prompt` (`com.tsuty.remoteagent.actions.SendPrompt`, default `Enter`) / `Insert Newline in Prompt` (`com.tsuty.remoteagent.actions.InsertNewline`, default `Shift+Enter`).
+* **Send Keybinding**: Configured via IDE standard `Settings > Keymap` for `Send Prompt` (`com.tsuty.sandboxagent.actions.SendPrompt`, default `Enter`) / `Insert Newline in Prompt` (`com.tsuty.sandboxagent.actions.InsertNewline`, default `Shift+Enter`).
 * **Auto-Approval (Auto-Allow)**: Not implemented (see §4.2).
 
 ### 5.1. Sandbox Type, Login Shell and Agent Command
@@ -302,5 +302,5 @@ which is what makes the behaviour of a connection predictable.
 ### 6.3. Logging & Auditing
 * **Attach Command Log**: The attach command line (`<sandbox command> exec -i "<sandbox name>" <agent command>`) is written to the IDE log whenever it is built, for the liveness probe as well as for the agent, since the settings do not display it. The terminal login command (`... exec -i -t ... <login shell>`) is logged the same way.
 * **ACP Traffic Log**: Records all JSON-RPC lines exchanged with agents (serving both debugging and audit trail purposes). Format: `{millisecond-timestamp} {OUT|IN} {raw JSON}` per line.
-* **Output Destination**: Located under the IDE log directory at `RemoteAgentConnector/{connection_timestamp}_{sessionId}.log`. Separate log files are kept per session; lines prior to `sessionId` establishment (such as `initialize`) are buffered in memory and flushed upon file creation.
+* **Output Destination**: Located under the IDE log directory at `SandboxAgentConnector/{connection_timestamp}_{sessionId}.log`. Separate log files are kept per session; lines prior to `sessionId` establishment (such as `initialize`) are buffered in memory and flushed upon file creation.
 * **Handling Failures**: Log writing failures are recorded as warnings in the IDE log without interrupting the session.

@@ -1,6 +1,6 @@
-# Remote Agent Connector
+# Sandbox Agent Connector
 
-**Remote Agent Connector** is a plugin for JetBrains IDEs (IntelliJ IDEA, etc.) designed to interact with and collaboratively develop alongside AI agents running in isolated sandbox environments (Docker Sandboxes / MicroVM, etc.).
+**Sandbox Agent Connector** is a plugin for JetBrains IDEs (IntelliJ IDEA, etc.) designed to interact with and collaboratively develop alongside AI agents running in isolated sandbox environments (Docker Sandboxes / MicroVM, etc.).
 
 While leveraging the IDE's lightweight nature and rich GUI (editor, Diff viewers, debugger, etc.), it isolates and offloads only AI agent execution, file modifications, and tool operations to the sandbox. Communication with the agent is handled via [ACP (Agent Client Protocol)](https://agentclientprotocol.com/).
 
@@ -35,7 +35,7 @@ Build the plugin from the repository and install it into your IDE.
 ./gradlew buildPlugin
 ```
 
-After the build completes, `build/distributions/RemoteAgentConnector-<version>.zip` will be generated.
+After the build completes, `build/distributions/SandboxAgentConnector-<version>.zip` will be generated.
 Install it by selecting the ZIP file from `Settings > Plugins > ⚙ > Install Plugin from Disk...` in the IDE, then restart the IDE.
 
 For detailed instructions, refer to the [Local Installation Guide (docs/development/LOCAL_INSTALL.md)](docs/development/LOCAL_INSTALL.md).
@@ -44,11 +44,11 @@ For detailed instructions, refer to the [Local Installation Guide (docs/developm
 Start a sandbox container with the project root mounted (e.g., Docker Sandboxes `sbx`).
 
 ### 3. Connecting to the Agent and Usage
-1. Open the **Remote Agent** tool window from the right sidebar of the IDE.
+1. Open the **Sandbox Agent** tool window from the right sidebar of the IDE.
 2. Click the connect icon on the toolbar to attach to the agent.
 3. Send instructions from the prompt input field to begin conversations or code modifications.
 
-Settings can be reviewed and configured under `Settings > Tools > Remote Agent Connector`.
+Settings can be reviewed and configured under `Settings > Tools > Sandbox Agent Connector`.
 
 ---
 

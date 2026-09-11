@@ -1,11 +1,11 @@
 <idea-plugin>
-    <id>com.tsuty.remoteagent</id>
-    <name>Remote Agent Connector</name>
+    <id>com.tsuty.sandboxagent</id>
+    <name>Sandbox Agent Connector</name>
     <vendor url="https://github.com/tsuty">tsuty</vendor>
 
     <description><![CDATA[
     <p>
-      <b>Remote Agent Connector</b> lets you pair-program with an AI coding agent that runs inside an
+      <b>Sandbox Agent Connector</b> lets you pair-program with an AI coding agent that runs inside an
       isolated sandbox (Docker Sandboxes <code>sbx</code>, Docker, Apple Container or WSL Containers),
       while your IDE stays lightweight on the host.
       Only agent execution, file editing and tool invocation are offloaded to the sandbox &mdash;
@@ -49,8 +49,8 @@
     <ol>
         <li>Start a sandbox that mounts your project root read-write (for example <code>sbx</code>).</li>
         <li>Configure the sandbox type, the sandbox name, the ACP agent (picked from the ACP registry) and the
-            remote workspace under <code>Settings &rarr; Tools &rarr; Remote Agent Connector</code>.</li>
-        <li>Open the <b>Remote Agent</b> tool window, attach to the sandbox and send your first prompt.</li>
+            remote workspace under <code>Settings &rarr; Tools &rarr; Sandbox Agent Connector</code>.</li>
+        <li>Open the <b>Sandbox Agent</b> tool window, attach to the sandbox and send your first prompt.</li>
     </ol>
     <p>
       The bundled Markdown plugin is a required dependency, and the transcript needs JCEF: where
@@ -60,7 +60,7 @@
     <p>
       The plugin never starts or stops the sandbox itself; it only attaches to an already running one,
       so you can keep working with the same container outside the IDE.
-      See the <a href="https://github.com/tsuty/RemoteAgentConnector">project page</a> for the full
+      See the <a href="https://github.com/tsuty/SandboxAgentConnector">project page</a> for the full
       specification and installation guide.
     </p>
     ]]></description>
@@ -71,14 +71,14 @@
         <li>Initial release.</li>
         <li>ACP v1 (JSON-RPC 2.0 over stdio) client that attaches to an agent running in a sandbox
             (Docker Sandboxes, Docker, Apple Container or WSL Containers).</li>
-        <li><code>Remote Agent</code> tool window: Markdown chat stream, thinking log, tool-call and plan cards,
+        <li><code>Sandbox Agent</code> tool window: Markdown chat stream, thinking log, tool-call and plan cards,
             slash commands, token usage and session history (switch / rename / delete).</li>
         <li>Inline permission cards for file changes (compact diff plus native full diff viewer) and command execution.</li>
         <li>Context chips for the active file, the selection and manually attached files, with auto-attach off by default.</li>
         <li>Optional read-only workspace lock during a turn and automatic VFS refresh of sandbox-side changes.</li>
         <li><code>Open Sandbox Terminal</code>: a login shell in the same sandbox, opened in a terminal tab of the IDE.</li>
         <li>Per-session ACP traffic log under the IDE log directory.</li>
-        <li>Settings page under <code>Tools &rarr; Remote Agent Connector</code> for the sandbox type and name,
+        <li>Settings page under <code>Tools &rarr; Sandbox Agent Connector</code> for the sandbox type and name,
             the login shell, the ACP agent (from the ACP registry; a <code>binary</code> distribution is started
             with a command entered by hand), the agent startup idle timeout, the remote workspace path,
             restoring the last session, the read-only workspace lock, context auto-attach and the transcript font size.</li>
@@ -92,68 +92,68 @@
     <depends optional="true" config-file="withTerminal.xml">org.jetbrains.plugins.terminal</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow id="Remote Agent"
+        <toolWindow id="Sandbox Agent"
                     anchor="right"
                     icon="/icons/toolWindowIcon.svg"
-                    factoryClass="com.tsuty.remoteagent.ui.RemoteAgentToolWindowFactory"/>
+                    factoryClass="com.tsuty.sandboxagent.ui.SandboxAgentToolWindowFactory"/>
 
-        <projectService serviceImplementation="com.tsuty.remoteagent.service.RemoteAgentService"/>
-        <projectService serviceImplementation="com.tsuty.remoteagent.session.SessionMetadataStore"/>
-        <projectService serviceImplementation="com.tsuty.remoteagent.session.SessionLockRegistry"/>
-        <projectService serviceImplementation="com.tsuty.remoteagent.vfs.AgentWorkspaceGuard"/>
+        <projectService serviceImplementation="com.tsuty.sandboxagent.service.SandboxAgentService"/>
+        <projectService serviceImplementation="com.tsuty.sandboxagent.session.SessionMetadataStore"/>
+        <projectService serviceImplementation="com.tsuty.sandboxagent.session.SessionLockRegistry"/>
+        <projectService serviceImplementation="com.tsuty.sandboxagent.vfs.AgentWorkspaceGuard"/>
 
         <!-- Locks the workspace in the IDE while the agent runs a turn; the sandbox keeps writing. -->
-        <writingAccessProvider implementation="com.tsuty.remoteagent.vfs.AgentWritingAccessProvider"/>
+        <writingAccessProvider implementation="com.tsuty.sandboxagent.vfs.AgentWritingAccessProvider"/>
 
-        <projectService serviceImplementation="com.tsuty.remoteagent.settings.RemoteAgentSettingsState"/>
+        <projectService serviceImplementation="com.tsuty.sandboxagent.settings.SandboxAgentSettingsState"/>
         <projectConfigurable parentId="tools"
-                             id="com.tsuty.remoteagent.settings"
-                             displayName="Remote Agent Connector"
-                             instance="com.tsuty.remoteagent.settings.RemoteAgentSettingsConfigurable"/>
+                             id="com.tsuty.sandboxagent.settings"
+                             displayName="Sandbox Agent Connector"
+                             instance="com.tsuty.sandboxagent.settings.SandboxAgentSettingsConfigurable"/>
 
         <!-- Carries what an action of the tool window cannot say in place, e.g. a sandbox terminal
              that cannot be opened (see SandboxTerminal). -->
-        <notificationGroup id="Remote Agent Connector" displayType="BALLOON"/>
+        <notificationGroup id="Sandbox Agent Connector" displayType="BALLOON"/>
 
         <!-- Wipes every persisted duplicate-open lock once on project open, so a lock that
              survived an unclean exit (crash, kill -9, ...) never blocks the next launch
-             (see RemoteAgentStartupActivity). -->
-        <postStartupActivity implementation="com.tsuty.remoteagent.session.RemoteAgentStartupActivity"/>
+             (see SandboxAgentStartupActivity). -->
+        <postStartupActivity implementation="com.tsuty.sandboxagent.session.SandboxAgentStartupActivity"/>
     </extensions>
 
     <projectListeners>
         <!-- Releases this window's duplicate-open locks before project close saves workspace.xml,
-             so a lock does not survive an IDE exit/restart (see RemoteAgentProjectCloseListener). -->
-        <listener class="com.tsuty.remoteagent.session.RemoteAgentProjectCloseListener"
+             so a lock does not survive an IDE exit/restart (see SandboxAgentProjectCloseListener). -->
+        <listener class="com.tsuty.sandboxagent.session.SandboxAgentProjectCloseListener"
                    topic="com.intellij.openapi.project.ProjectManagerListener"/>
     </projectListeners>
 
     <actions>
-        <action id="com.tsuty.remoteagent.actions.SendPrompt"
-                class="com.tsuty.remoteagent.actions.SendPromptAction"
+        <action id="com.tsuty.sandboxagent.actions.SendPrompt"
+                class="com.tsuty.sandboxagent.actions.SendPromptAction"
                 text="Send Prompt"
-                description="Sends the current prompt to the remote agent">
+                description="Sends the current prompt to the sandbox agent">
             <keyboard-shortcut keymap="$default" first-keystroke="ENTER"/>
         </action>
-        <action id="com.tsuty.remoteagent.actions.InsertNewline"
-                class="com.tsuty.remoteagent.actions.InsertNewlineAction"
+        <action id="com.tsuty.sandboxagent.actions.InsertNewline"
+                class="com.tsuty.sandboxagent.actions.InsertNewlineAction"
                 text="Insert Newline in Prompt"
                 description="Inserts a newline in the prompt input without sending it">
             <keyboard-shortcut keymap="$default" first-keystroke="shift ENTER"/>
         </action>
 
         <!-- Both are put into the `Options` menu of the tool window header by
-             RemoteAgentToolWindowFactory; they are registered here so they can be found and bound
+             SandboxAgentToolWindowFactory; they are registered here so they can be found and bound
              to a shortcut like any other action. -->
-        <action id="com.tsuty.remoteagent.actions.OpenSandboxTerminal"
-                class="com.tsuty.remoteagent.actions.OpenSandboxTerminalAction"
+        <action id="com.tsuty.sandboxagent.actions.OpenSandboxTerminal"
+                class="com.tsuty.sandboxagent.actions.OpenSandboxTerminalAction"
                 icon="/icons/console.svg"
                 text="Open Sandbox Terminal"
                 description="Logs into the configured sandbox in a terminal tab of the IDE"/>
-        <action id="com.tsuty.remoteagent.actions.OpenRemoteAgentSettings"
-                class="com.tsuty.remoteagent.actions.OpenRemoteAgentSettingsAction"
+        <action id="com.tsuty.sandboxagent.actions.OpenSandboxAgentSettings"
+                class="com.tsuty.sandboxagent.actions.OpenSandboxAgentSettingsAction"
                 icon="/icons/settings.svg"
                 text="Settings"
-                description="Opens the settings page of the Remote Agent Connector plugin"/>
+                description="Opens the settings page of the Sandbox Agent Connector plugin"/>
     </actions>
 </idea-plugin>

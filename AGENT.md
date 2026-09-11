@@ -4,7 +4,7 @@ This file provides guidance for AI coding agents working in this repository.
 
 ## Project Overview
 
-**Remote Agent Connector** is a plugin for JetBrains IDEs (IntelliJ IDEA, etc.) designed to interact with and
+**Sandbox Agent Connector** is a plugin for JetBrains IDEs (IntelliJ IDEA, etc.) designed to interact with and
 collaboratively develop alongside AI agents running in isolated sandbox environments (Docker Sandboxes / MicroVM,
 etc.).
 
@@ -44,15 +44,15 @@ For detailed specifications and architecture, see [docs/Specification.md](docs/S
 ```
 
 - Test framework is JUnit Platform (`tasks.test { useJUnitPlatform() }`).
-- After a successful build, `build/distributions/RemoteAgentConnector-<version>.zip` is generated.
+- After a successful build, `build/distributions/SandboxAgentConnector-<version>.zip` is generated.
 
 ## Repository Structure
 
 ```
-src/main/kotlin/com/tsuty/remoteagent/
+src/main/kotlin/com/tsuty/sandboxagent/
 ├── ui/            # Tool window, transcript rendering, and other UI layers
 │   └── transcript/  # JCEF based transcript web view
-├── settings/      # Settings > Tools > Remote Agent Connector
+├── settings/      # Settings > Tools > Sandbox Agent Connector
 ├── vfs/           # Virtual file system related code (file change sync, etc.)
 ├── actions/       # IDE actions (menus, toolbars, etc.)
 ├── service/       # Project-level services
@@ -64,7 +64,7 @@ src/main/resources/
 ├── icons/         # SVG icons (see docs/development/ICONS.md)
 └── transcript/    # HTML/JS/CSS for the transcript view (loaded into JCEF)
 
-src/test/kotlin/com/tsuty/remoteagent/   # Unit tests, mirroring the packages above
+src/test/kotlin/com/tsuty/sandboxagent/   # Unit tests, mirroring the packages above
 
 docs/
 ├── Specification.md                       # Specification & architecture design

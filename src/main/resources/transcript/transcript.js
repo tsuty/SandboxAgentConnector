@@ -1,5 +1,5 @@
 /*
- * Transcript document of the Remote Agent tool window.
+ * Transcript document of the Sandbox Agent tool window.
  *
  * The host (see JcefTranscriptView) hands over batches of events and gets actions back:
  *
