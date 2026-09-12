@@ -50,6 +50,7 @@ object TranscriptToolCall {
         val switchMode = ToolCallPresentation.switchModeEntry(toolCall)
         return PermissionEvent(
             id = id,
+            toolCallId = toolCall.toolCallId,
             headline = headline(toolCall, switchMode),
             bodyHtml = switchMode
                 ?.let { TranscriptHtml.render(it.plan) }

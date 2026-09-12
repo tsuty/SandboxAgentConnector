@@ -127,7 +127,7 @@ transcript instead of doubling it.
 | `attachments` | `id`, `chips` | add attachment chips to a `USER` block (a replay reports them after the prompt) |
 | `group` | `id`, `timed`, `closed`, `elapsedMs` | open / close a tool call group; the label (`Working… 12s`, `Worked 12s`) is rendered and ticked by the web side |
 | `toolCall` | see below | add or update a tool call card (upsert by `id`) |
-| `permission` | `id`, `headline`, `bodyHtml`, `flat`, `options` | inline approval card |
+| `permission` | `id`, `toolCallId`, `headline`, `bodyHtml`, `flat`, `options` | inline approval card; `toolCallId` is what the `flat` diff of the card is opened by (`id` names the request, not a tool call) |
 | `permissionResolved` | `id`, `status` | disable the buttons, show what was picked |
 | `turnEnd` | `id`, `targetId` | anchor the "scroll to the start of the turn" action to block `id` |
 | `toast` | `text` | show a message over the bottom edge for a moment |

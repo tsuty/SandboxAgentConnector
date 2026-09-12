@@ -98,6 +98,8 @@ class TranscriptToolCallTest {
         assertEquals(listOf(true, false), event.options.map { it.allow })
         // The change is a single line opening the diff viewer, never unfolded on the card.
         assertEquals(0, requireNotNull(event.flat).targets.single().diffIndex)
+        // The diff is looked up by the tool call of the request, not by the id of the request.
+        assertEquals("toolu_edit", event.toolCallId)
     }
 
     @Test

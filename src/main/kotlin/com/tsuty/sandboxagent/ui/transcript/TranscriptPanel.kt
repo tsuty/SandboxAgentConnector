@@ -295,7 +295,12 @@ class TranscriptPanel(
         closeGroup()
         val id = request.requestId.key
         permissions[id] = Pending(request, request.options, onSelect)
-        val event = TranscriptToolCall.permissionEvent(id, request.toolCall, request.options)
+        // The request carries the state of its tool call, which is what the diff of its card is
+        // opened from: an approval may arrive before any `tool_call` update drew a card for it.
+        val toolCall = request.toolCall
+        val merged = toolCalls[toolCall.toolCallId]?.mergeWith(toolCall) ?: toolCall
+        toolCalls[toolCall.toolCallId] = merged
+        val event = TranscriptToolCall.permissionEvent(id, merged, request.options)
         view.post(
             if (event.options.isEmpty()) {
                 event.copy(options = listOf(TranscriptPermissionOption(CANCEL_OPTION, "Cancel")))

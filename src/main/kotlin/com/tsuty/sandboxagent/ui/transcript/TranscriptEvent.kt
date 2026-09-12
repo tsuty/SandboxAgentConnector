@@ -195,6 +195,11 @@ data class TranscriptPermissionOption(
 @SerialName("permission")
 data class PermissionEvent(
     val id: String,
+    /**
+     * Tool call the request belongs to, which is what an [OpenDiffAction] of [flat] addresses:
+     * [id] is the id of the request itself and names no tool call the host knows.
+     */
+    val toolCallId: String = "",
     val headline: String,
     val bodyHtml: String = "",
     /** Shown right away instead of being folded away: the plan behind a `switch_mode`. */

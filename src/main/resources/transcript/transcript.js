@@ -510,7 +510,8 @@
             line.appendChild(el('span', 'prefix', event.flat.prefix));
             (event.flat.targets || []).forEach(function (target, index) {
                 if (index > 0) line.appendChild(el('span', 'separator', event.flat.separator || '→'));
-                line.appendChild(targetLink({id: event.id}, target));
+                // A diff belongs to the tool call behind the request, not to the request itself.
+                line.appendChild(targetLink({id: event.toolCallId || event.id}, target));
             });
             node.appendChild(line);
         }
