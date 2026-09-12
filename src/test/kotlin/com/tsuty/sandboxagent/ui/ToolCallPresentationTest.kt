@@ -103,7 +103,9 @@ class ToolCallPresentationTest {
     }
 
     @Test
-    fun `an executed command with empty output produces console markdown`() {
+    fun `an executed command with empty output omits the output section`() {
+        // A permission request asks before the command has run (or the agent simply reports
+        // nothing back), so there is nothing to show yet: an empty section would only be noise.
         val execute = ToolCall(
             toolCallId = "toolu_bash",
             kind = ToolKind.EXECUTE,
@@ -114,9 +116,6 @@ class ToolCallPresentationTest {
         val expectedMarkdown = """
             ```console
             npm test
-            ```
-            Output:
-            ```text
             ```
         """.trimIndent()
         assertEquals(expectedMarkdown, ToolCallPresentation.expandedBody(execute))

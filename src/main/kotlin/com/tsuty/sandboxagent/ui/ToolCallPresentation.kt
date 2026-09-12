@@ -165,13 +165,17 @@ object ToolCallPresentation {
         return buildString {
             appendLine("```console")
             appendLine(input)
-            appendLine("```")
-            appendLine("Output:")
-            appendLine("```text")
-            if (output.isNotEmpty()) {
-                appendLine(output)
-            }
             append("```")
+            // A permission request asks before the command has run, so there is nothing to show
+            // yet, and many commands report no output at all even once they have: an empty
+            // section is only noise.
+            if (output.isNotEmpty()) {
+                appendLine()
+                appendLine("Output:")
+                appendLine("```text")
+                appendLine(output)
+                append("```")
+            }
         }
     }
 
