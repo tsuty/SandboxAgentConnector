@@ -61,7 +61,7 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
     var agentIconSvg: String = ""
 
     /** ACP `cwd` sent with `session/new`; empty means "use the local project root". */
-    var remoteWorkspacePath: String = ""
+    var sandboxWorkspacePath: String = ""
     var restoreLastSession: Boolean = false
     var autoAttachContext: Boolean = false
 
@@ -153,7 +153,7 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
         sandboxCommand = SandboxTypes.byId(sandboxTypeId).command,
         sandboxName = sandboxName,
         agentCommand = agent().command,
-        remoteWorkspacePath = remoteWorkspacePath,
+        sandboxWorkspacePath = sandboxWorkspacePath,
         restoreLastSession = restoreLastSession,
         initializeIdleTimeoutSeconds = initializeIdleTimeoutSecondsOrDefault(),
     )

@@ -49,7 +49,7 @@
     <ol>
         <li>Start a sandbox that mounts your project root read-write (for example <code>sbx</code>).</li>
         <li>Configure the sandbox type, the sandbox name, the ACP agent (picked from the ACP registry) and the
-            remote workspace under <code>Settings &rarr; Tools &rarr; Sandbox Agent Connector</code>.</li>
+            sandbox workspace under <code>Settings &rarr; Tools &rarr; Sandbox Agent Connector</code>.</li>
         <li>Open the <b>Sandbox Agent</b> tool window, attach to the sandbox and send your first prompt.</li>
     </ol>
     <p>
@@ -80,7 +80,7 @@
         <li>Per-session ACP traffic log under the IDE log directory.</li>
         <li>Settings page under <code>Tools &rarr; Sandbox Agent Connector</code> for the sandbox type and name,
             the login shell, the ACP agent (from the ACP registry; a <code>binary</code> distribution is started
-            with a command entered by hand), the agent startup idle timeout, the remote workspace path,
+            with a command entered by hand), the agent startup idle timeout, the sandbox workspace path,
             restoring the last session, the read-only workspace lock, context auto-attach and the transcript font size.</li>
     </ul>
     ]]></change-notes>

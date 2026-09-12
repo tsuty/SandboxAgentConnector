@@ -130,7 +130,7 @@ class AcpClientTest {
         )
 
         val failure = withTimeout(2_000) { deferred.await() }.exceptionOrNull()
-        assertEquals(-32602, assertIs<AcpRemoteException>(failure).error.code)
+        assertEquals(-32602, assertIs<AcpSandboxException>(failure).error.code)
     }
 
     @Test
@@ -155,7 +155,7 @@ class AcpClientTest {
     }
 
     @Test
-    fun `remote errors are raised as exceptions`() = runBlocking {
+    fun `sandbox errors are raised as exceptions`() = runBlocking {
         val sent = mutableListOf<String>()
         val client = AcpClient(writeLine = { sent += it })
 
@@ -168,18 +168,18 @@ class AcpClientTest {
         )
 
         val failure = withTimeout(2_000) { deferred.await() }.exceptionOrNull()
-        assertEquals(-32602, assertIs<AcpRemoteException>(failure).error.code)
+        assertEquals(-32602, assertIs<AcpSandboxException>(failure).error.code)
     }
 
     @Test
-    fun `remote error details are appended to the exception message`() {
+    fun `sandbox error details are appended to the exception message`() {
         val error = AcpJson.decodeFromString(
             JsonRpcError.serializer(),
             """{"code":-32603,"message":"Internal error","data":{"details":"bypassPermissions is disabled"}}""",
         )
 
         assertEquals("bypassPermissions is disabled", error.details)
-        assertEquals("ACP error -32603: Internal error: bypassPermissions is disabled", AcpRemoteException(error).message)
+        assertEquals("ACP error -32603: Internal error: bypassPermissions is disabled", AcpSandboxException(error).message)
     }
 
     @Test
@@ -191,7 +191,7 @@ class AcpClientTest {
 
         assertNull(error.details)
         assertNull(JsonRpcError(JsonRpcError.INVALID_PARAMS, "bad cwd").details)
-        assertEquals("ACP error -32602: bad cwd", AcpRemoteException(error).message)
+        assertEquals("ACP error -32602: bad cwd", AcpSandboxException(error).message)
     }
 
     @Test

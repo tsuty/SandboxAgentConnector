@@ -21,7 +21,7 @@ data class SandboxConfig(
     val sandboxName: String = "",
     val agentCommand: String = "npx -y @agentclientprotocol/claude-agent-acp",
     /** ACP `cwd`: the working directory **inside** the sandbox. Empty falls back to the project root. */
-    val remoteWorkspacePath: String = "",
+    val sandboxWorkspacePath: String = "",
     /** Reuse the previous `sessionId` through `session/load` when the agent supports it. */
     val restoreLastSession: Boolean = false,
     /**

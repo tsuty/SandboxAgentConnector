@@ -139,8 +139,8 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
         }
 
         groupRowsRange("ACP Session") {
-            row("Remote workspace path (CWD):") {
-                textField().bindText(settings::remoteWorkspacePath).align(AlignX.FILL)
+            row("Sandbox workspace path (CWD):") {
+                textField().bindText(settings::sandboxWorkspacePath).align(AlignX.FILL)
             }
             row {
                 comment("Sent as the ACP <code>cwd</code> of <code>session/new</code>, e.g. /workspace. Empty uses the local project root.")

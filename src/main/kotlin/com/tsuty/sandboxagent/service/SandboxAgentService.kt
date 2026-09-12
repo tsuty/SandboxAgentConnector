@@ -658,7 +658,7 @@ class SandboxAgentService(private val project: Project) : Disposable {
         append("session/new failed, so no session was created: the model and the mode selectors stay ")
         append("empty until the next prompt opens one. Make sure the ACP cwd \"")
         append(resolvedCwd())
-        append("\" exists inside the sandbox, or set \"Remote workspace path (CWD)\" in ")
+        append("\" exists inside the sandbox, or set \"Sandbox workspace path (CWD)\" in ")
         append("Settings | Tools | Sandbox Agent Connector.")
         error.message?.takeIf { it.isNotBlank() }?.let {
             append("\nThe agent reported: ")
@@ -1038,11 +1038,11 @@ class SandboxAgentService(private val project: Project) : Disposable {
     }
 
     /**
-     * The sandbox side working directory: the configured remote path, or the local project root
+     * The sandbox side working directory: the configured sandbox path, or the local project root
      * as a fallback so a sandbox that mirrors the project layout still works out of the box.
      */
     fun resolvedCwd(): String =
-        config.remoteWorkspacePath.trim().ifEmpty { project.basePath.orEmpty() }
+        config.sandboxWorkspacePath.trim().ifEmpty { project.basePath.orEmpty() }
 
     /** Sends a prompt in the background; returns immediately. */
     fun sendPrompt(prompt: String, context: List<AcpContextItem> = emptyList()): Job {
@@ -1054,7 +1054,7 @@ class SandboxAgentService(private val project: Project) : Disposable {
     suspend fun sendPromptSuspending(prompt: String, context: List<AcpContextItem> = emptyList()) {
         val acpClient = client
         if (acpClient == null) {
-            publish(SandboxAgentEvent.Error("Remote agent session is not connected"))
+            publish(SandboxAgentEvent.Error("Sandbox agent session is not connected"))
             return
         }
         // The session is normally created with the connection; it is only created here when that
@@ -1421,7 +1421,7 @@ class SandboxAgentService(private val project: Project) : Disposable {
     private fun publish(event: SandboxAgentEvent) {
         runCatching { recorder.record(event) }.onFailure { log.warn("Failed to record the transcript", it) }
         listeners.forEach {
-            runCatching { it.onEvent(event) }.onFailure { failure -> log.warn("Remote agent listener failed", failure) }
+            runCatching { it.onEvent(event) }.onFailure { failure -> log.warn("Sandbox agent listener failed", failure) }
         }
     }
 

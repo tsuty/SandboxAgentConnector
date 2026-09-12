@@ -82,7 +82,7 @@ fun parseAcpLine(line: String, json: Json = AcpJson): AcpIncoming? {
     }
 }
 
-class AcpRemoteException(val error: JsonRpcError) :
+class AcpSandboxException(val error: JsonRpcError) :
     RuntimeException("ACP error ${error.code}: ${error.fullMessage}")
 
 class AcpTimeoutException(message: String) : RuntimeException(message)
@@ -250,7 +250,7 @@ class AcpClient(
         idleTimeoutMillis: Long? = null,
     ): T {
         val response = request(method, params, timeoutMillis, idleTimeoutMillis)
-        response.error?.let { throw AcpRemoteException(it) }
+        response.error?.let { throw AcpSandboxException(it) }
         val result = response.result
             ?: throw IllegalStateException("ACP response for '$method' carries neither result nor error")
         return json.decodeFromJsonElement(deserializer, result)
@@ -312,7 +312,7 @@ class AcpClient(
             AcpMethods.SESSION_DELETE,
             json.encodeToJsonElement(SessionDeleteParams.serializer(), params),
         )
-        response.error?.let { throw AcpRemoteException(it) }
+        response.error?.let { throw AcpSandboxException(it) }
         return SessionDeleteResult()
     }
 
@@ -374,7 +374,7 @@ class AcpClient(
         fallback: T,
     ): T {
         val response = request(method, params)
-        response.error?.let { throw AcpRemoteException(it) }
+        response.error?.let { throw AcpSandboxException(it) }
         val result = response.result as? JsonObject ?: return fallback
         return runCatching { json.decodeFromJsonElement(deserializer, result) }
             .onFailure { log.debug("Ignoring unexpected '$method' result: $result", it) }

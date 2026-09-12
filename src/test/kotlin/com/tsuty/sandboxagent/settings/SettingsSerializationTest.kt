@@ -16,7 +16,7 @@ class SettingsSerializationTest {
         assertEquals("/bin/bash -l", settings.loginShell().command)
         assertEquals("claude-acp", settings.agentId)
         assertEquals("npx -y @agentclientprotocol/claude-agent-acp", settings.agent().command)
-        assertEquals("", settings.remoteWorkspacePath)
+        assertEquals("", settings.sandboxWorkspacePath)
         assertFalse(settings.restoreLastSession)
         assertFalse(settings.autoAttachContext)
         assertEquals(180, settings.initializeIdleTimeoutSeconds)
@@ -47,7 +47,7 @@ class SettingsSerializationTest {
                     description = "Google's official CLI for Gemini",
                 ),
             )
-            remoteWorkspacePath = "/workspace"
+            sandboxWorkspacePath = "/workspace"
             restoreLastSession = true
             autoAttachContext = true
             initializeIdleTimeoutSeconds = 300
@@ -63,7 +63,7 @@ class SettingsSerializationTest {
         assertEquals("/bin/zsh -l", restored.loginShell().command)
         assertEquals(original.agent(), restored.agent())
         assertEquals("npx -y @google/gemini-cli@0.58.0 --acp", restored.agent().command)
-        assertEquals(original.remoteWorkspacePath, restored.remoteWorkspacePath)
+        assertEquals(original.sandboxWorkspacePath, restored.sandboxWorkspacePath)
         assertEquals(original.restoreLastSession, restored.restoreLastSession)
         assertEquals(original.autoAttachContext, restored.autoAttachContext)
         assertEquals(original.initializeIdleTimeoutSeconds, restored.initializeIdleTimeoutSeconds)
@@ -118,7 +118,7 @@ class SettingsSerializationTest {
             sandboxName = "my sandbox"
             agentPackage = "@google/gemini-cli@0.58.0"
             agentArgs = "--acp"
-            remoteWorkspacePath = "/workspace"
+            sandboxWorkspacePath = "/workspace"
             restoreLastSession = true
             initializeIdleTimeoutSeconds = 300
         }
@@ -128,7 +128,7 @@ class SettingsSerializationTest {
         assertEquals("container", config.sandboxCommand)
         assertEquals(settings.sandboxName, config.sandboxName)
         assertEquals("npx -y @google/gemini-cli@0.58.0 --acp", config.agentCommand)
-        assertEquals(settings.remoteWorkspacePath, config.remoteWorkspacePath)
+        assertEquals(settings.sandboxWorkspacePath, config.sandboxWorkspacePath)
         assertEquals(settings.restoreLastSession, config.restoreLastSession)
         assertEquals(settings.initializeIdleTimeoutSeconds, config.initializeIdleTimeoutSeconds)
     }
