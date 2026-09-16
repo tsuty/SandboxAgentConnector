@@ -78,7 +78,9 @@ class PromptInputPanel(
         // The field is created without a document, and EditorTextField only starts forwarding
         // document events once one exists, so the freshly created document is installed here;
         // otherwise `documentChanged` above would never fire and typing "/" would go unnoticed.
-        setDocument(document)
+        // `document` lazily creates it via PsiDocumentManager, which is PSI/VFS read access and
+        // therefore must run inside a read action (see RuntimeExceptionWithAttachments reports).
+        ApplicationManager.getApplication().runReadAction { setDocument(document) }
     }
 
     /**
