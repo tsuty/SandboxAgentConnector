@@ -3,6 +3,7 @@ package com.tsuty.sandboxagent.service
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.SystemInfo
 import com.tsuty.sandboxagent.acp.AcpClient
 import com.tsuty.sandboxagent.acp.AcpContextItem
 import com.tsuty.sandboxagent.acp.AcpJson
@@ -1041,8 +1042,12 @@ class SandboxAgentService(private val project: Project) : Disposable {
      * The sandbox side working directory: the configured sandbox path, or the local project root
      * as a fallback so a sandbox that mirrors the project layout still works out of the box.
      */
-    fun resolvedCwd(): String =
-        config.sandboxWorkspacePath.trim().ifEmpty { project.basePath.orEmpty() }
+    fun resolvedCwd(): String {
+        val configured = config.sandboxWorkspacePath.trim()
+        if (configured.isNotEmpty()) return configured
+        val basePath = project.basePath.orEmpty()
+        return if (SystemInfo.isWindows) windowsPathToPosix(basePath) else basePath
+    }
 
     /** Sends a prompt in the background; returns immediately. */
     fun sendPrompt(prompt: String, context: List<AcpContextItem> = emptyList()): Job {
@@ -1470,3 +1475,15 @@ class SandboxAgentService(private val project: Project) : Disposable {
 
 /** Convenience helper for the transcript: `"Turn finished"`, `"Cancelled"`, ... */
 fun SandboxAgentEvent.TurnFinished.presentableText(): String = StopReason.presentableText(stopReason)
+
+/**
+ * Rewrites a Windows drive path (`C:/Users/...`, or `C:\Users\...` before IntelliJ normalizes it
+ * with [Project.getBasePath]) into the POSIX form (`/c/Users/...`) that Git Bash / MSYS / WSL
+ * sandboxes expect as a `cwd`. Left untouched when the path is not a recognizable drive path.
+ */
+fun windowsPathToPosix(path: String): String {
+    val normalized = path.replace('\\', '/')
+    val match = Regex("^([A-Za-z]):/(.*)$").matchEntire(normalized) ?: return normalized
+    val (drive, rest) = match.destructured
+    return "/${drive.lowercase()}/$rest"
+}
