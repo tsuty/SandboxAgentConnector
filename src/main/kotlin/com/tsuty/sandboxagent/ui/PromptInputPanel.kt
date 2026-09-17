@@ -113,7 +113,11 @@ class PromptInputPanel(
         // A prompt is prose, so the spell checker would underline half of it (and every identifier
         // the user pastes in); the code inspections of the Markdown plugin stay on, because that is
         // what injects — and highlights — the code inside a fence.
-        SpellCheckingEditorCustomizationProvider.getInstance().disabledCustomization?.customize(editor)
+        // Customizing the editor restarts the daemon code analyzer, which accesses PSI/Document
+        // and therefore must run inside a read action.
+        ApplicationManager.getApplication().runReadAction {
+            SpellCheckingEditorCustomizationProvider.getInstance().disabledCustomization?.customize(editor)
+        }
         // Opens the fence language completion while typing instead of on Ctrl+Space only. The
         // contributor is bound to FENCE_LANG, so the popup cannot appear in ordinary prose.
         editor.putUserData(AutoPopupController.ALWAYS_AUTO_POPUP, true)
