@@ -719,6 +719,23 @@ class SandboxAgentMainPanel(
         promptInput.requestFocusInWindow()
     }
 
+    /**
+     * Called by [SandboxAgentTabsPanel] once a `CardLayout` switch showed this panel: the
+     * transcript browser was not laid out while hidden and has to catch up (see
+     * [TranscriptPanel.onShown]).
+     */
+    fun onShown() {
+        chatLog.onShown()
+    }
+
+    /**
+     * Called by [SandboxAgentTabsPanel] when another tab took this panel's place: the transcript
+     * holds its events back until the panel is shown again (see [TranscriptPanel.onHidden]).
+     */
+    fun onHidden() {
+        chatLog.onHidden()
+    }
+
     override fun dispose() {
         service.removeListener(listener)
     }

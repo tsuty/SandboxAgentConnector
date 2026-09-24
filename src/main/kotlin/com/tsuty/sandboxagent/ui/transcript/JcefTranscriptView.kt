@@ -14,6 +14,7 @@ import org.cef.handler.CefContextMenuHandlerAdapter
 import org.cef.handler.CefLifeSpanHandlerAdapter
 import org.cef.handler.CefLoadHandler
 import org.cef.handler.CefLoadHandlerAdapter
+import org.cef.handler.CefRequestHandler
 import org.cef.handler.CefRequestHandlerAdapter
 import org.cef.network.CefRequest
 import java.net.URI
@@ -23,9 +24,10 @@ import javax.swing.Timer
 /**
  * The transcript rendered by the browser bundled with the JetBrains Runtime.
  *
- * One instance per tool window: a Chromium renderer costs a process and tens of megabytes, so a
- * session switch replaces the content of this document (see [ResetEvent]) instead of creating
- * another browser.
+ * One instance per tab: a Chromium renderer costs a process and tens of megabytes, so a session
+ * switch inside a tab replaces the content of this document (see [ResetEvent]) instead of creating
+ * another browser. A tab in the background holds its events back (see [onHidden]) instead of
+ * patching a document nobody looks at.
  *
  * The browser is created **off screen**: a windowed JCEF component is a native child window and
  * would swallow every lightweight Swing popup drawn over it — the `/` command completion, the
@@ -78,6 +80,12 @@ class JcefTranscriptView(
 
     private var ready = false
 
+    /**
+     * `false` while the tab of this transcript is in the background (see [onHidden]): the log keeps
+     * growing, but nothing is flushed until the tab is shown again (see [onShown]).
+     */
+    private var shown = true
+
     /** Loads of our own, capped so a document that cannot be loaded is not loaded forever. */
     private var recoveries = 0
 
@@ -103,9 +111,11 @@ class JcefTranscriptView(
     }
 
     override fun post(events: List<TranscriptEvent>) {
-        if (events.isEmpty()) return
-        events.forEach { record(it) }
-        if (!ready) return
+        // A toast is a moment's confirmation: shown later, after a tab switch, it confirms nothing.
+        val kept = if (shown) events else events.filter { it !is ToastEvent }
+        if (kept.isEmpty()) return
+        kept.forEach { record(it) }
+        if (!ready || !shown) return
         if (!flushTimer.isRunning) flushTimer.restart()
     }
 
@@ -120,6 +130,50 @@ class JcefTranscriptView(
      */
     override fun scrollToBottom() {
         execute("window.transcript.scrollToBottom();")
+    }
+
+    /**
+     * Wakes the browser up after its card was brought back to the front.
+     *
+     * A hidden card is not laid out: a tool window resized, or moved to a screen of another scale,
+     * while the tab was in the background leaves Chromium drawing for the old size, and Swing
+     * keeps stretching the last frame it got — a transcript that looks shrunk and does not scroll.
+     * Telling the browser its size and screen again makes it render a fresh frame.
+     *
+     * A document that ran out of [recoveries] is given another chance as well: being looked at
+     * again is the moment a reader expects it to work.
+     *
+     * Whatever arrived while the tab was hidden goes to the document now, as one batch.
+     */
+    override fun onShown() {
+        shown = true
+        val component = browser.component
+        val cefBrowser = browser.cefBrowser
+        cefBrowser.notifyScreenInfoChanged()
+        if (component.width > 0 && component.height > 0) {
+            cefBrowser.wasResized(component.width, component.height)
+        }
+        component.revalidate()
+        component.repaint()
+        if (!ready && recoveries >= MAX_RECOVERIES) {
+            recoveries = 0
+            recover()
+        }
+        flushTimer.stop()
+        flush()
+    }
+
+    /**
+     * Holds the events back while the tab of this transcript is in the background.
+     *
+     * Every tab stays connected and keeps receiving its session, but a hidden off screen browser
+     * may have its rendering throttled or stopped by Chromium (or by macOS App Nap), and a DOM
+     * patched there the whole time is the one that came back frozen. The log already is the queue
+     * of a document that is not ready yet, so a hidden one simply waits the same way.
+     */
+    override fun onHidden() {
+        shown = false
+        flushTimer.stop()
     }
 
     /**
@@ -209,6 +263,17 @@ class JcefTranscriptView(
             if (isDocument(url) || isEmptyPage(url)) return false
             follow(url)
             return true
+        }
+
+        /**
+         * A renderer that died (a crash, or macOS reclaiming memory) leaves the last frame on
+         * screen and never reports a load end, so nothing else would ever load the document again.
+         */
+        override fun onRenderProcessTerminated(
+            cefBrowser: CefBrowser?,
+            status: CefRequestHandler.TerminationStatus?,
+        ) {
+            onEdt { recover() }
         }
     }
 
@@ -336,7 +401,7 @@ class JcefTranscriptView(
     }
 
     private fun flush() {
-        if (!ready) return
+        if (!ready || !shown) return
         if (!resetPending && flushed >= log.size) return
         val events =
             if (resetPending) listOf(ResetEvent()) + log

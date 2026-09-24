@@ -28,4 +28,17 @@ interface TranscriptView {
      * prompt that was just sent, or the jump of the document itself.
      */
     fun scrollToBottom() = Unit
+
+    /**
+     * Called when the tab holding this view is brought to the front again, after it was hidden:
+     * whatever changed meanwhile (the size, the screen) is picked up now, and the events held back
+     * while it was hidden are drawn.
+     */
+    fun onShown() = Unit
+
+    /**
+     * Called when the tab holding this view was sent to the background: the events keep arriving
+     * but may be held back until [onShown].
+     */
+    fun onHidden() = Unit
 }

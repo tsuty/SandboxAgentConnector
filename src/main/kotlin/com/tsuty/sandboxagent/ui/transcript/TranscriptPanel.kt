@@ -339,6 +339,12 @@ class TranscriptPanel(
     /** Moves to the newest entry, which is where a prompt that was just sent is answered. */
     fun scrollToBottom() = view.scrollToBottom()
 
+    /** The tab of this transcript was brought to the front again (see [TranscriptView.onShown]). */
+    fun onShown() = view.onShown()
+
+    /** The tab of this transcript was sent to the background (see [TranscriptView.onHidden]). */
+    fun onHidden() = view.onHidden()
+
     // ------------------------------------------------------------------ blocks
 
     /**

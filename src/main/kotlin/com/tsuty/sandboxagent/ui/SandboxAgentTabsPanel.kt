@@ -184,6 +184,9 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
      * or accept input from the fresh position, until something unrelated finally forces a layout.
      */
     private fun selectTab(tab: Tab?) {
+        val previous = selectedTab
+        // The tab left behind keeps its connection but stops patching a document nobody sees.
+        if (previous != null && previous != tab) previous.panel.onHidden()
         selectedTab = tab
         if (tab != null) cardLayout.show(cards, tab.id.toString())
         cards.revalidate()
@@ -192,6 +195,14 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         tabStrip.revalidate()
         tabStrip.repaint()
         tab?.panel?.focusPrompt()
+        // After the layout above: the browser is told the size the card has now, not the old one.
+        // A tab closed (and disposed) in between is not selected any more and is left alone.
+        if (tab != null) {
+            ApplicationManager.getApplication().invokeLater(
+                { if (selectedTab == tab) tab.panel.onShown() },
+                project.disposed,
+            )
+        }
     }
 
     private fun onTabEvent(tab: Tab, event: SandboxAgentEvent) {

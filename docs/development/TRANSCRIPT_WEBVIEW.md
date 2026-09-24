@@ -37,7 +37,8 @@ adapter has to be rewritten.
 
 | Topic | Decision |
 | --- | --- |
-| Browser instances | **one per `TranscriptPanel`** (= one per tool window / project window). A session switch swaps the document content, it never recreates the browser. |
+| Browser instances | **one per `TranscriptPanel`** (= one per tab of the tool window, up to 10). A session switch inside a tab swaps the document content, it never recreates the browser. |
+| Tabs in the background | a hidden tab keeps its connection and its event log, but **holds the events back** and hands them over in one batch once it is shown again; the browser is told its size and screen at that moment as well (see § 10). |
 | Rendering mode | **off-screen rendering (OSR)**, so IDE popups (`SlashCommandPopup`, `AttachFilePopup`, `SessionHistoryPopup`, `FlatControls`) can never be hidden behind a native child window. |
 | CSS | **bundled**, derived from the GitHub-like Markdown stylesheet; no dependency on internal resources of the bundled Markdown plugin. |
 | Markdown → HTML | **Kotlin side**, `org.intellij.markdown` GFM (reuses `MarkdownView.toHtmlBody`). |
@@ -246,7 +247,10 @@ an agent wrote stays the text it is; the files of the project are reached throug
 rows. `JcefTranscriptView` watches the loads on top of that: a load end for anything but the
 document URL, and every load error, is answered by loading the document again and replaying the
 log (capped at three attempts in a row, so a document that cannot be loaded is not loaded
-forever).
+forever). A renderer process that terminated (`CefRequestHandler.onRenderProcessTerminated` — a
+crash, or the OS reclaiming memory) is answered the same way, since it leaves the last frame on
+screen and never reports a load end; and a tab that is brought to the front after the attempts ran
+out gets three fresh ones.
 
 ## 7. Behaviour kept from the Swing implementation
 
@@ -304,3 +308,66 @@ All of them are implemented; the table is kept as the record of what each phase 
 
 Reused as-is: `MarkdownView.segments` / `toHtmlBody` / `taskListItems` / `choicesMarkdown`,
 `ToolCallPresentation`, `UnifiedDiffSupport`, and the file / diff opening helpers.
+
+## 10. Tabs and their browsers
+
+### 10.1 The problem
+
+Every tab of the tool window (Ph2 §4) owns a `SandboxAgentMainPanel`, and with it a
+`TranscriptPanel` and a browser of its own; the tabs are the cards of a `CardLayout`, and every one
+of them stays connected in the background. Coming back to a tab sometimes showed a transcript that
+looked like a shrunk picture and did not scroll — the tab felt hung. With off-screen rendering
+Swing only ever paints the last frame Chromium handed over, so all of these look exactly like that:
+
+* a hidden card is not laid out: a tool window resized, or moved to a screen of another scale,
+  while the tab was in the background leaves Chromium drawing for the old size, and Swing stretches
+  the old frame to the new one;
+* a hidden off-screen browser may have its rendering throttled or stopped (by Chromium, or by
+  macOS App Nap) while its DOM keeps being patched by the live session, and does not pick up again;
+* the renderer process died and nothing ever loaded the document again.
+
+### 10.2 What is done (the specification)
+
+* **Shown** — `SandboxAgentTabsPanel.selectTab` calls `SandboxAgentMainPanel.onShown` →
+  `TranscriptPanel.onShown` → `TranscriptView.onShown` once the switch has been laid out
+  (`invokeLater`, and only while that tab is still the selected one, so a tab closed in between is
+  left alone). `JcefTranscriptView` then sends `notifyScreenInfoChanged()` and
+  `wasResized(width, height)` to the browser and repaints the component, which makes Chromium
+  render a fresh frame for the current size and scale. A document that ran out of its recovery
+  attempts is loaded again.
+* **Hidden** — the tab that loses the selection is told `onHidden` along the same chain. From then
+  on `JcefTranscriptView` keeps recording into its log (the same log that is the queue of a page
+  still loading, § 4) but does not flush it: a document nobody looks at is not patched. `onShown`
+  flushes whatever piled up in one batch; the stale-entry rules of the log (a finished stream keeps
+  only its `blockHtml`, …) keep that batch small. A `toast` arriving while hidden is dropped, since
+  a confirmation shown later confirms nothing.
+* **Renderer terminated** — `onRenderProcessTerminated` reloads the document and replays the log,
+  like every other lost document (§ 6).
+* The scroll position, the folded entries and the search state of a tab survive a switch, because
+  its document is never rebuilt for it.
+* `PlainTextTranscriptView` ignores both calls.
+
+The cost that remains is memory: every open tab keeps one Chromium renderer process alive (up to
+10 tabs).
+
+### 10.3 If that is not enough: one browser per tool window
+
+Should the renderers of many tabs turn out to be a real problem (memory pressure, renderers being
+reclaimed by the OS, the freeze coming back all the same), the next step is to go back to **one
+browser per tool window** and move the log out of the view:
+
+* every tab keeps only its event log (the `record` / `forget` rules of `JcefTranscriptView` move to
+  a per-tab model), and the tool window owns the one `JcefTranscriptView`;
+* switching tabs sends a `reset` followed by the log of the tab that is now shown — the same replay
+  a reloaded document already goes through; the events of every other tab are only recorded.
+
+| | held back events (current) | one browser, replayed log |
+| --- | --- | --- |
+| renderer processes | one per tab (up to 10) | one per tool window |
+| a freeze of a hidden browser | avoided by waking it up on show | impossible: there is no hidden browser |
+| switching tabs | instant | rebuilds the document, slower with a long transcript |
+| scroll position, folding, search, selection | kept | lost, unless saved and restored per tab by hand |
+| size of the change | contained in `JcefTranscriptView` | the log moves out of the view, the tab panel owns the browser |
+
+The held-back events are the first answer because they are small and keep the switch instant; the
+single browser is the fallback for the case they do not cover, which is memory.
