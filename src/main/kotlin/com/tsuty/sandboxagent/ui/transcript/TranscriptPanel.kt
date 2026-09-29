@@ -148,7 +148,8 @@ class TranscriptPanel(
     private fun postAgent() {
         val settings = SandboxAgentSettingsState.getInstance(project)
         val svg = settings.agentIconSvgOrNull()
-        val symbol = svg?.let { runCatching { TranscriptIcons.agentSymbol(it) }.getOrNull() }
+        val color = settings.agentColorOrNull()
+        val symbol = svg?.let { runCatching { TranscriptIcons.agentSymbol(it, color) }.getOrNull() }
         view.post(AgentEvent(name = settings.agentNameOrDefault(), iconSymbol = symbol))
     }
 

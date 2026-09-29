@@ -59,6 +59,7 @@ import com.tsuty.sandboxagent.acp.key
 import com.tsuty.sandboxagent.acp.plainText
 import com.tsuty.sandboxagent.acp.promptAttachments
 import com.tsuty.sandboxagent.acp.userPromptText
+import com.tsuty.sandboxagent.session.LocalSessionFile
 import com.tsuty.sandboxagent.session.SessionLockRegistry
 import com.tsuty.sandboxagent.session.SessionMetadataStore
 import com.tsuty.sandboxagent.session.SessionSnapshot
@@ -299,6 +300,12 @@ data class SessionSelectors(
 }
 
 /**
+ * A local snapshot file shown in a Read Only tab: a backup or a deleted session (see
+ * [SandboxAgentService.readOnlySource]). [title] is resolved once, when the tab is opened.
+ */
+data class ReadOnlySource(val file: LocalSessionFile, val snapshot: SessionSnapshot, val title: String)
+
+/**
  * Project level service owning the `sbx` sandbox lifecycle and the ACP v1 session.
  *
  * Connection flow: health check → agent start → `initialize` → `session/list` → `session/new`.
@@ -310,7 +317,16 @@ data class SessionSelectors(
  * [pristineSessionRef]): it is reused instead of creating another one, kept out of the local history
  * and out of the history dropdown, and deleted on the agent side when it is left behind.
  */
-class SandboxAgentService(private val project: Project) : Disposable {
+class SandboxAgentService(
+    private val project: Project,
+    /**
+     * Set for the service of a Read Only tab: such a service never connects, never takes a lock
+     * and only redraws [ReadOnlySource.snapshot] (see [openReadOnly]).
+     */
+    val readOnlySource: ReadOnlySource?,
+) : Disposable {
+    constructor(project: Project) : this(project, null)
+
     private val log = Logger.getInstance(SandboxAgentService::class.java)
 
     /** Owns every background operation of the session; cancelled together with the service. */
@@ -458,7 +474,7 @@ class SandboxAgentService(private val project: Project) : Disposable {
      * [SessionState.ERROR] still reads "No session": the failure itself is surfaced elsewhere
      * (e.g. `chatLog.appendError`), not through this label.
      */
-    fun presentableSessionTitle(): String = when (state) {
+    fun presentableSessionTitle(): String = readOnlySource?.title ?: when (state) {
         SessionState.DISCONNECTED, SessionState.ERROR -> "No session"
         SessionState.CONNECTING -> "Connecting…"
         SessionState.READY -> sessionTitle?.takeIf { it.isNotBlank() } ?: "New session"
@@ -489,6 +505,27 @@ class SandboxAgentService(private val project: Project) : Disposable {
     fun connect(agentCommand: String = config.agentCommand): Job =
         scope.launch { connectSuspending(agentCommand) }
 
+    /** `true` for the service of a Read Only tab (see [readOnlySource]). */
+    val isReadOnly: Boolean
+        get() = readOnlySource != null
+
+    /**
+     * Draws the snapshot of a Read Only tab. The session is deliberately not adopted: no
+     * `sessionId` is set, so no lock is taken or released, and nothing is ever saved back.
+     */
+    fun openReadOnly() {
+        val source = readOnlySource ?: return
+        recorder.restore(source.snapshot)
+        publish(
+            SandboxAgentEvent.SessionRestored(
+                source.snapshot.sessionId,
+                source.title,
+                source.snapshot,
+                contextRestored = false,
+            ),
+        )
+    }
+
     /**
      * Attach flow, made of four steps:
      * 1. Health check — a lightweight probe that confirms the sandbox is reachable (exit code only).
@@ -497,6 +534,7 @@ class SandboxAgentService(private val project: Project) : Disposable {
      * 4. `session/list` — publishes the sessions the user may enter; nothing is restored yet.
      */
     suspend fun connectSuspending(agentCommand: String = config.agentCommand) {
+        if (isReadOnly) return
         if (state == SessionState.CONNECTING || state == SessionState.READY) return
         persistedConfig()?.let { config = it }
         setState(SessionState.CONNECTING, "Checking sandbox...")
@@ -845,9 +883,9 @@ class SandboxAgentService(private val project: Project) : Disposable {
      *
      * | agent | local snapshot | behaviour |
      * |---|---|---|
-     * | `resume` | fresh | draw the snapshot, reconnect through `session/resume` |
-     * | `load` only | fresh | draw the snapshot, reconnect through a *suppressed* `session/load` |
-     * | `load` / `resume` | stale or missing | replay `session/load` live, then save a new snapshot |
+     * | `resume` | present | draw the snapshot, reconnect through `session/resume` |
+     * | `load` only | present | draw the snapshot, reconnect through a *suppressed* `session/load` |
+     * | `load` / `resume` | missing or empty | replay `session/load` live, then save a new snapshot |
      * | none | present | draw the snapshot only (visual restore, no agent context) |
      * | none | missing | reject the selection and keep the current session |
      */
@@ -898,7 +936,9 @@ class SandboxAgentService(private val project: Project) : Disposable {
                 publish(SandboxAgentEvent.SessionRestored(sessionId, title, snapshot, contextRestored = false))
                 return
             }
-            if (snapshot != null && snapshot.isFreshFor(entry.lastUpdatedMillis)) {
+            // The local record always wins when there is one: the agent's last update time moves
+            // on a mere load / resume, so it cannot tell whether the conversation changed.
+            if (snapshot != null && snapshot.isRestorable) {
                 adoptSession(sessionId, title)
                 recorder.restore(snapshot)
                 // Draw first, reconnect after: the transcript is already known locally.
@@ -906,6 +946,7 @@ class SandboxAgentService(private val project: Project) : Disposable {
                 reconnectSilently(acpClient, sessionId)
                 return
             }
+            // No local history: the replay is the only source, so there is nothing to back up.
             adoptSession(sessionId, title)
             publish(SandboxAgentEvent.SessionRestored(sessionId, title, snapshot = null, contextRestored = true))
             replayHistory(acpClient, entry, title)
@@ -980,9 +1021,9 @@ class SandboxAgentService(private val project: Project) : Disposable {
         metadataStore()?.renameOverride(entry.sessionId) ?: entry.title ?: snapshot?.title
 
     /**
-     * Persists the transcript of [sessionId]. [agentUpdatedAt] must be the last update time the
-     * agent reports for the session, so the freshness check of the next restore is meaningful;
-     * when the agent tracks none, the local time is stored instead.
+     * Persists the transcript of [sessionId]. [agentUpdatedAt] is the last update time the agent
+     * reports for the session, kept for information only (a restore never compares it); when the
+     * agent tracks none, the local time is stored instead.
      */
     private fun saveSnapshot(sessionId: String, agentUpdatedAt: Long?, title: String? = sessionTitleRef.get()) {
         val entries = recorder.entries()
@@ -1020,7 +1061,8 @@ class SandboxAgentService(private val project: Project) : Disposable {
             runCatching { acpClient.deleteSession(SessionDeleteParams(sessionId)) }
                 .onFailure { log.info("session/delete failed for $sessionId", it) }
         }
-        runCatching { snapshotStore.delete(sessionId) }
+        // The snapshot is moved aside, not erased: a deleted session stays searchable locally.
+        runCatching { snapshotStore.moveToDeleted(sessionId) }
             .onFailure { log.warn("Failed to delete the snapshot of $sessionId", it) }
         metadataStore()?.delete(sessionId)
         if (sessionIdRef.get() == sessionId) {
@@ -1100,8 +1142,8 @@ class SandboxAgentService(private val project: Project) : Disposable {
     }
 
     /**
-     * Stores the transcript once the turn ended. The agent side update time is re-read from
-     * `session/list` so the next restore can tell a fresh snapshot from a stale one.
+     * Stores the transcript once the turn ended. `session/list` is re-read to keep the session
+     * list current; the agent side update time it reports is stored for information only.
      */
     private suspend fun saveSnapshotAfterTurn(sessionId: String) {
         val agentUpdatedAt = if (canListSessions) {
@@ -1275,6 +1317,12 @@ class SandboxAgentService(private val project: Project) : Disposable {
 
     override fun dispose() {
         scope.cancel()
+        if (isReadOnly) {
+            // Nothing was started or locked, and resetting the workspace guard here would unlock
+            // the editors behind a turn another tab is running.
+            listeners.clear()
+            return
+        }
         closeSession()
         // Belt and braces: [closeSession] already released the current session's lock, this also
         // catches anything left over (e.g. a lock claimed but never adopted because of a race).

@@ -122,6 +122,12 @@ class AgentSelector : JPanel(VerticalLayout(VERTICAL_GAP)) {
     val agent: AcpAgent get() = current
 
     /**
+     * Told about the selected agent whenever it may have changed, so what the dialog shows per
+     * agent (its color, see `AgentColors`) can follow the drop down before anything is applied.
+     */
+    var onAgentChanged: ((AcpAgent) -> Unit)? = null
+
+    /**
      * The reason the selected agent cannot be started, or `null` when it can be. Only a `binary`
      * entry ever has one: every other command is derived and cannot be wrong.
      */
@@ -204,6 +210,7 @@ class AgentSelector : JPanel(VerticalLayout(VERTICAL_GAP)) {
             "${it.key}=${it.value}"
         }
         revalidate()
+        onAgentChanged?.invoke(current)
     }
 
     /** An agent picked before the registry was reachable has no version to show. */

@@ -61,6 +61,12 @@ class SandboxAgentMainPanel(
      */
     private val service: SandboxAgentService = SandboxAgentService.getInstance(project),
 ) : JPanel(BorderLayout()), Disposable {
+    /**
+     * A Read Only tab (a backup or a deleted session, see [SandboxAgentService.readOnlySource]):
+     * only the transcript and the status are shown — no prompt, no attachments, no new session.
+     */
+    private val readOnly = service.isReadOnly
+
     // Choices the agent offers as a Markdown task list are answered straight from the transcript.
     private val chatLog = TranscriptPanel(project) { submitPrompt(it) }
     private val chips = ContextChipsPanel(project)
@@ -169,12 +175,16 @@ class SandboxAgentMainPanel(
         // The transcript owns the embedded browser it renders in.
         Disposer.register(this, chatLog)
 
-        val splitter = JBSplitter(true, "SandboxAgentConnector.splitter", 0.7f)
-        SandboxAgentColors.paintPanelBackground(splitter)
-        splitter.firstComponent = chatLog
-        splitter.secondComponent = bottomPanel()
         add(toolbar(), BorderLayout.NORTH)
-        add(splitter, BorderLayout.CENTER)
+        if (readOnly) {
+            add(chatLog, BorderLayout.CENTER)
+        } else {
+            val splitter = JBSplitter(true, "SandboxAgentConnector.splitter", 0.7f)
+            SandboxAgentColors.paintPanelBackground(splitter)
+            splitter.firstComponent = chatLog
+            splitter.secondComponent = bottomPanel()
+            add(splitter, BorderLayout.CENTER)
+        }
 
         service.addListener(listener)
         updateSessionState(service.state, null)
@@ -237,7 +247,7 @@ class SandboxAgentMainPanel(
 
         val right = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(ACTION_BAR_GAP), 0))
         right.isOpaque = false
-        right.add(newSessionButton)
+        if (!readOnly) right.add(newSessionButton)
 
         // The right side's FlowLayout already contributes its gap on the outer side, so only the
         // remainder is added there to reach CONTENT_MARGIN from the tool window edge; the left
@@ -438,7 +448,7 @@ class SandboxAgentMainPanel(
         if (snapshot != null) {
             renderSnapshot(snapshot)
         }
-        if (!event.contextRestored) {
+        if (!event.contextRestored && !readOnly) {
             chatLog.appendSystemMessage(
                 "This agent cannot resume a session: the transcript below is restored from the local history only, " +
                     "so the agent has no context of it.",
@@ -635,6 +645,15 @@ class SandboxAgentMainPanel(
     }
 
     private fun updateSessionState(state: SessionState, message: String?) {
+        val source = service.readOnlySource
+        if (source != null) {
+            // Nothing ever connects here: the status names the file the transcript comes from.
+            statusLabel.icon = null
+            statusLabel.text = LocalSessionPresentation.readOnlyStatus(source.file)
+            messageLabel.icon = null
+            messageLabel.text = ""
+            return
+        }
         val connecting = state == SessionState.CONNECTING
         val connected = state == SessionState.READY
         val isError = state == SessionState.ERROR
@@ -716,6 +735,7 @@ class SandboxAgentMainPanel(
      * are visible but the keyboard focus is still, invisibly, on the tab just left.
      */
     fun focusPrompt() {
+        if (readOnly) return
         promptInput.requestFocusInWindow()
     }
 

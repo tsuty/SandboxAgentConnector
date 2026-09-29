@@ -52,8 +52,16 @@ object TranscriptIcons {
      * It takes the place of the bundled `agent` icon, so every `<use>` of the document — the ones
      * already on screen included — follows it. Its colors are kept: a brand icon is recognized by
      * them, and unlike the bundled set it has no monochrome variant to fall back on.
+     *
+     * A [color] the settings give the agent (`AgentColors`) takes the place of the text color for
+     * what the drawing leaves uncolored (`currentColor`, or no color at all), the same shapes the
+     * toolbar paints in it; the colors the drawing chose itself are still kept.
      */
-    fun agentSymbol(svg: String): String = symbol("agent", svg, recolor = false)
+    fun agentSymbol(svg: String, color: String? = null): String {
+        val symbol = symbol("agent", svg, recolor = false)
+        if (color == null) return symbol
+        return symbol.replace(CURRENT_COLOR, color)
+    }
 
     /**
      * Turns the export [svg] into the `<symbol>` of [name].
@@ -93,6 +101,8 @@ object TranscriptIcons {
             ?: error("Missing transcript icon: $name.svg")
 
     const val PREFIX = "ra-icon-"
+
+    private val CURRENT_COLOR = Regex("""\bcurrentColor\b""", RegexOption.IGNORE_CASE)
 
     private const val DEFAULT_VIEW_BOX = "0 0 16 16"
 

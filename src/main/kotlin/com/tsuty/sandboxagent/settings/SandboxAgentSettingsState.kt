@@ -60,6 +60,13 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
     var agentIconUrl: String = ""
     var agentIconSvg: String = ""
 
+    /**
+     * Colors chosen for agents, `#RRGGBB` by the `id` of their registry entry (see [AgentColors]).
+     * An agent without an entry is drawn in its default color, and one without a default the way
+     * it always was, so a color that is reset is removed rather than stored.
+     */
+    var agentColors: MutableMap<String, String> = LinkedHashMap()
+
     /** ACP `cwd` sent with `session/new`; empty means "use the local project root". */
     var sandboxWorkspacePath: String = ""
     var restoreLastSession: Boolean = false
@@ -133,6 +140,9 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
 
     /** The stored drawing of the agent; `null` whenever the bundled one is to be used instead. */
     fun agentIconSvgOrNull(): String? = agentIconSvg.takeIf { it.isNotBlank() }
+
+    /** The color the selected agent is drawn in; `null` leaves its drawing as it is. */
+    fun agentColorOrNull(): String? = AgentColors.resolve(agent().id, agentColors)
 
     /** The persisted idle timeout, kept inside the range the settings dialog offers. */
     fun initializeIdleTimeoutSecondsOrDefault(): Int =

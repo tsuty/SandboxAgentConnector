@@ -6,6 +6,7 @@ import com.intellij.openapi.options.BoundConfigurable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogPanel
+import com.intellij.ui.ColorPanel
 import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.dsl.builder.AlignX
@@ -36,7 +37,24 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
     // What was actually started is written to the IDE log instead (see `SandboxProcessManager`).
     // The one exception is an agent shipped as a pre-built binary, whose command is typed here
     // because nothing else can know it (see `AgentSelector`).
-    private val agentSelector = AgentSelector()
+    private val agentSelector = AgentSelector().apply { onAgentChanged = { showAgentColor(it.id) } }
+
+    /**
+     * The colors of the dialog, by agent id, until they are applied: the drop down may switch to
+     * another agent and back before that, and each one keeps the color it was given meanwhile.
+     */
+    private val agentColorEdits = LinkedHashMap<String, String>()
+
+    /** Set while the dialog itself puts a color into [agentColorPanel], which is not a choice. */
+    private var showingAgentColor = false
+
+    private val agentColorPanel = ColorPanel().apply {
+        addActionListener {
+            if (showingAgentColor) return@addActionListener
+            val color = selectedColor ?: return@addActionListener
+            storeAgentColor(agentSelector.agent.id, AgentColors.toHex(color))
+        }
+    }
 
     // Every section shares the grid of the panel (`groupRowsRange` instead of `group`), which is
     // what keeps the label column — and with it the left edge of every drop down, field and
@@ -182,6 +200,43 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
                         "read at the same size, and the quiet rows (timestamps, tool calls) one step smaller.",
                 )
             }
+            row("Agent color:") {
+                cell(agentColorPanel)
+                    .onReset {
+                        agentColorEdits.clear()
+                        agentColorEdits.putAll(settings.agentColors)
+                        showAgentColor(agentSelector.agent.id)
+                    }
+                    .onIsModified { agentColorEdits != settings.agentColors }
+                    .onApply { settings.agentColors = LinkedHashMap(agentColorEdits) }
+                button("Reset to Default") {
+                    val agentId = agentSelector.agent.id
+                    agentColorEdits.remove(agentId)
+                    showAgentColor(agentId)
+                }
+            }
+            row {
+                comment(
+                    "Color of the selected agent on its tabs and on the <b>Agent</b> header of the transcript, " +
+                        "one for every theme. Only what the drawing of the agent leaves uncolored takes it; " +
+                        "the colors of a brand icon are kept. Without a color the agent is drawn as before.",
+                )
+            }
+        }
+    }
+
+    /** A color picked for [agentId]; one equal to its default is not stored (see [AgentColors]). */
+    private fun storeAgentColor(agentId: String, hex: String) {
+        if (hex == AgentColors.defaultOf(agentId)) agentColorEdits.remove(agentId) else agentColorEdits[agentId] = hex
+    }
+
+    /** Shows the color [agentId] would be drawn in, empty for one drawn as before. */
+    private fun showAgentColor(agentId: String) {
+        showingAgentColor = true
+        try {
+            agentColorPanel.selectedColor = AgentColors.toColor(AgentColors.resolve(agentId, agentColorEdits))
+        } finally {
+            showingAgentColor = false
         }
     }
 

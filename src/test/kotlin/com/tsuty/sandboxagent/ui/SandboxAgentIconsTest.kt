@@ -170,6 +170,22 @@ class SandboxAgentIconsTest {
         assertEquals(setOf(0xd97757), opaqueColors(icon))
     }
 
+    /** The color of the agent (`AgentColors`) paints what the drawing left to its surroundings. */
+    @Test
+    fun `an agent color paints what the drawing left uncolored`() {
+        listOf(CURRENT_COLOR_SVG, UNCOLORED_SVG).forEach { svg ->
+            val icon = assertNotNull(SandboxAgentIcons.agent(svg, "#4245DB"), "the agent drawing did not render")
+            assertEquals(setOf(0x4245DB), opaqueColors(icon), svg)
+        }
+    }
+
+    /** ... and leaves the colors of a brand icon alone. */
+    @Test
+    fun `an agent color keeps the colors of the drawing`() {
+        val icon = assertNotNull(SandboxAgentIcons.agent(AGENT_SVG, "#4245DB"), "the agent drawing did not render")
+        assertEquals(setOf(0xd97757), opaqueColors(icon))
+    }
+
     /** The coordinates of every pixel the [icon] paints at all, however faintly. */
     private fun markedPixels(icon: Icon): List<Pair<Int, Int>> {
         val image = BufferedImage(icon.iconWidth, icon.iconHeight, BufferedImage.TYPE_INT_ARGB)

@@ -1,18 +1,27 @@
 package com.tsuty.sandboxagent.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.tsuty.sandboxagent.acp.SessionListEntry
 import com.tsuty.sandboxagent.service.PermissionRequest
+import com.tsuty.sandboxagent.service.ReadOnlySource
 import com.tsuty.sandboxagent.service.SandboxAgentEvent
 import com.tsuty.sandboxagent.service.SandboxAgentEventListener
 import com.tsuty.sandboxagent.service.SandboxAgentService
 import com.tsuty.sandboxagent.service.SessionState
+import com.tsuty.sandboxagent.session.LocalSessionFile
+import com.tsuty.sandboxagent.session.LocalSessionKind
+import com.tsuty.sandboxagent.session.LocalSessionSearchResult
+import com.tsuty.sandboxagent.session.SessionMetadataStore
+import com.tsuty.sandboxagent.session.SessionSnapshotStore
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsBridge
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
 import java.awt.BorderLayout
@@ -75,6 +84,9 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
 
     private var selectedTab: Tab? = null
 
+    /** Set once disposed: a Read Only tab whose file was still being read must not be added then. */
+    private var disposed = false
+
     init {
         val bar = JPanel(BorderLayout())
         bar.isOpaque = false
@@ -117,14 +129,121 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         }
     }
 
-    /** Creates a fresh tab and connects it; a no-op once [TabsController.canAddTab] is `false`. */
-    private fun addTab() {
-        val tab = controller.addTab() ?: return
+    /** Creates a fresh tab and connects it; `null` once [TabsController.canAddTab] is `false`. */
+    private fun addTab(): Tab? {
+        val tab = controller.addTab() ?: return null
         cards.add(tab.panel, tab.id.toString())
         tab.service.connect()
         tab.service.addListener(SandboxAgentEventListener { event -> onEdt { onTabEvent(tab, event) } })
         renderTabStrip()
         selectTab(tab)
+        return tab
+    }
+
+    /**
+     * Opens the local session search centred on [anchor] — the tool window component, since the
+     * options menu it is started from is gone by then.
+     */
+    fun showLocalSessionSearch(anchor: JComponent = this) {
+        LocalSessionSearchPopup.show(project, anchor) { result -> openSearchResult(result) }
+    }
+
+    /**
+     * A current snapshot is entered like a pick of the session list, in the active tab when it is
+     * connected and otherwise in a new tab once that one has its session (see [restoreInNewTab]);
+     * a backup or a deleted file opens in a Read Only tab.
+     */
+    private fun openSearchResult(result: LocalSessionSearchResult) {
+        if (result.file.kind != LocalSessionKind.CURRENT) {
+            openReadOnlyTab(result.file)
+            return
+        }
+        val service = selectedTab?.service
+        if (service != null && !service.isReadOnly && service.state == SessionState.READY) {
+            service.selectSession(entryFor(service, result))
+            return
+        }
+        restoreInNewTab(result)
+    }
+
+    /**
+     * The restore waits for [SandboxAgentEvent.SessionEstablished]: a tab creates its own session
+     * right after connecting, and entering another one before that finished would race it.
+     */
+    private fun restoreInNewTab(result: LocalSessionSearchResult) {
+        val tab = addTab()
+        if (tab == null) {
+            notify(TAB_LIMIT_MESSAGE)
+            return
+        }
+        val service = tab.service
+        lateinit var listener: SandboxAgentEventListener
+        listener = SandboxAgentEventListener { event ->
+            val done = when (event) {
+                is SandboxAgentEvent.SessionEstablished -> {
+                    service.selectSession(entryFor(service, result))
+                    true
+                }
+                is SandboxAgentEvent.StateChanged ->
+                    event.state == SessionState.ERROR || event.state == SessionState.DISCONNECTED
+                else -> false
+            }
+            if (done) service.removeListener(listener)
+        }
+        service.addListener(listener)
+    }
+
+    private fun entryFor(service: SandboxAgentService, result: LocalSessionSearchResult): SessionListEntry =
+        service.sessions.firstOrNull { it.sessionId == result.sessionId }
+            ?: SessionListEntry(sessionId = result.sessionId, title = result.title)
+
+    /**
+     * Opens [file] — a backup or a deleted snapshot — in a Read Only tab, which never connects and
+     * counts towards the same [TabsController.MAX_TABS] as every other tab. The file is read off
+     * the EDT; a file that cannot be read and a full strip are reported instead of opened.
+     */
+    fun openReadOnlyTab(file: LocalSessionFile) {
+        if (!controller.canAddTab) {
+            notify(TAB_LIMIT_MESSAGE)
+            return
+        }
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val snapshot = runCatching {
+                SessionSnapshotStore(SessionSnapshotStore.directoryFor(project)).loadFile(file.file)
+            }.getOrNull()
+            onEdt {
+                if (disposed) return@onEdt
+                if (snapshot == null) {
+                    notify("Cannot open ${file.file.name}: the file is missing or unreadable.")
+                    return@onEdt
+                }
+                val rename = runCatching { SessionMetadataStore.getInstance(project).renameOverride(snapshot.sessionId) }.getOrNull()
+                val title = rename ?: snapshot.title?.takeIf { it.isNotBlank() } ?: snapshot.sessionId
+                addReadOnlyTab(ReadOnlySource(file, snapshot, title))
+            }
+        }
+    }
+
+    private fun addReadOnlyTab(source: ReadOnlySource) {
+        // The limit is checked again: another tab may have been opened while the file was read.
+        val tab = controller.addTab(SandboxAgentService(project, source))
+        if (tab == null) {
+            notify(TAB_LIMIT_MESSAGE)
+            return
+        }
+        cards.add(tab.panel, tab.id.toString())
+        tab.service.addListener(SandboxAgentEventListener { event -> onEdt { onTabEvent(tab, event) } })
+        // After the panel listens: the snapshot is drawn from the event this publishes.
+        tab.service.openReadOnly()
+        renderTabStrip()
+        selectTab(tab)
+    }
+
+    private fun notify(message: String) {
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup(NOTIFICATION_GROUP)
+            .createNotification(message, NotificationType.WARNING)
+            .notify(project)
     }
 
     /**
@@ -254,6 +373,7 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
     }
 
     override fun dispose() {
+        disposed = true
         chips.values.forEach { it.stopPulse() }
         Disposer.dispose(controller)
     }
@@ -438,6 +558,7 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
          * the tab remains the way to end a session's process (Ph2 §4.5).
          */
         private fun attach() {
+            if (tab.service.isReadOnly) return
             when (tab.service.state) {
                 SessionState.DISCONNECTED, SessionState.ERROR -> tab.service.connect()
                 SessionState.CONNECTING, SessionState.READY -> Unit
@@ -477,12 +598,12 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
          */
         private fun showSessionHistory() {
             if (tab.service.state != SessionState.READY) return
-            SessionHistoryPopup.show(this, project, tab.service)
+            SessionHistoryPopup.show(this, project, tab.service) { file -> openReadOnlyTab(file) }
         }
 
         /** `Rename` / `Delete` of the session currently open in this tab. */
         private fun showSessionContextMenu(e: MouseEvent) {
-            if (contextMenuShown) return
+            if (contextMenuShown || tab.service.isReadOnly) return
             val service = tab.service
             val sessionId = service.sessionId ?: return
             val entry = service.sessions.firstOrNull { it.sessionId == sessionId }
@@ -510,7 +631,7 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
          * the pointer currently operates on.
          */
         private fun updateCaret() {
-            caretLabel.isVisible = actsOnClick() && tab.service.state == SessionState.READY
+            caretLabel.isVisible = actsOnClick() && tab.service.state == SessionState.READY && !tab.service.isReadOnly
         }
 
         /**
@@ -552,6 +673,14 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
 
         /** Connection state of this tab, drawn on [agentLabel] with the selected agent's icon. */
         fun updateConnection() {
+            if (tab.service.isReadOnly) {
+                // No agent behind a Read Only tab: no pulse, no mark, nothing to attach.
+                stopPulse()
+                agentBase = SandboxAgentIcons.readOnlyTabIcon()
+                paintAgent()
+                agentLabel.toolTipText = "Read only"
+                return
+            }
             val state = tab.service.state
             val mark = mark()
             agentBase = agentIcon(mark)
@@ -617,8 +746,10 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         }
 
         /** The agent icon carrying [mark], drawn with whatever the selected agent brought along. */
-        private fun agentIcon(mark: AgentMark): Icon =
-            SandboxAgentIcons.agentIcon(SandboxAgentSettingsState.getInstance(project).agentIconSvgOrNull(), mark)
+        private fun agentIcon(mark: AgentMark): Icon {
+            val settings = SandboxAgentSettingsState.getInstance(project)
+            return SandboxAgentIcons.agentIcon(settings.agentIconSvgOrNull(), mark, settings.agentColorOrNull())
+        }
 
         private fun elide(text: String): String =
             if (text.length <= MAX_TITLE_CHARS) text else text.take(MAX_TITLE_CHARS - 1).trimEnd() + "…"
@@ -631,7 +762,24 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         override fun getMinimumSize(): Dimension = Dimension(JBUI.scale(MIN_WIDTH), preferredSize.height)
     }
 
-    private companion object {
+    companion object {
+        /** Id of the tool window this panel is the content of (see `plugin.xml`). */
+        const val TOOL_WINDOW_ID = "Sandbox Agent"
+
+        /**
+         * The tabs panel of [project]'s tool window, or `null` while the tool window has no
+         * content yet (it is created lazily, the first time the tool window is shown).
+         */
+        fun find(project: Project): SandboxAgentTabsPanel? =
+            ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
+                ?.contentManagerIfCreated
+                ?.contents
+                ?.firstNotNullOfOrNull { it.component as? SandboxAgentTabsPanel }
+
+        private const val NOTIFICATION_GROUP = "Sandbox Agent Connector"
+
+        private const val TAB_LIMIT_MESSAGE = "Tab limit reached (10): close a tab to open another one."
+
         /** Ph2 §4: the title is elided to this many characters, the tooltip always shows it in full. */
         private const val MAX_TITLE_CHARS = 16
 

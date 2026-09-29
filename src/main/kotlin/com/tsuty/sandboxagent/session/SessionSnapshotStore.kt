@@ -76,8 +76,9 @@ data object TurnEndEntry : TranscriptEntry
  * Locally stored display state of one session.
  *
  * [savedAt] is when the IDE wrote the file, [agentUpdatedAt] is the last update the agent reported
- * for the session at that moment — the pair is what [isFreshFor] compares to decide whether the
- * snapshot may be shown instead of replaying the whole history.
+ * for the session at that moment. Neither decides whether the snapshot is shown (see
+ * [isRestorable]): the agent moves its update time on a mere `session/load` / `session/resume`,
+ * so comparing it would replay sessions that did not change at all.
  */
 @Serializable
 data class SessionSnapshot(
@@ -89,18 +90,11 @@ data class SessionSnapshot(
     val entries: List<TranscriptEntry> = emptyList(),
 ) {
     /**
-     * `true` when the snapshot still covers everything the agent knows about the session.
-     *
-     * An agent that does not report a last update time ([agentLastUpdated] `null`) cannot be
-     * compared against, and the snapshot is then accepted: showing a possibly slightly stale
-     * transcript is preferable to replaying every session on every switch.
+     * `true` when the snapshot is shown instead of replaying the history: whenever it holds
+     * anything. The local record always wins over the agent's, which only a replay of a session
+     * without local history ever uses.
      */
-    fun isFreshFor(agentLastUpdated: Long?): Boolean {
-        if (entries.isEmpty()) return false
-        if (agentLastUpdated == null) return true
-        val known = agentUpdatedAt ?: return false
-        return known >= agentLastUpdated
-    }
+    val isRestorable: Boolean get() = entries.isNotEmpty()
 }
 
 /**
@@ -167,17 +161,21 @@ class SessionSnapshotStore(
             entries = entries,
         )
         try {
-            directory.mkdirs()
-            val target = fileOf(sessionId).toPath()
-            val temporary = Files.createTempFile(target.parent, target.fileName.toString(), ".tmp")
-            Files.write(
-                temporary,
-                json.encodeToString(SessionSnapshot.serializer(), snapshot).toByteArray(StandardCharsets.UTF_8),
-            )
-            moveAtomically(temporary, target)
+            write(snapshot)
         } catch (e: Exception) {
             log.warn("Failed to save the session snapshot of $sessionId", e)
         }
+    }
+
+    private fun write(snapshot: SessionSnapshot) {
+        directory.mkdirs()
+        val target = fileOf(snapshot.sessionId).toPath()
+        val temporary = Files.createTempFile(target.parent, target.fileName.toString(), ".tmp")
+        Files.write(
+            temporary,
+            json.encodeToString(SessionSnapshot.serializer(), snapshot).toByteArray(StandardCharsets.UTF_8),
+        )
+        moveAtomically(temporary, target)
     }
 
     /**
@@ -185,21 +183,29 @@ class SessionSnapshotStore(
      * when its schema version cannot be migrated to [SESSION_SNAPSHOT_SCHEMA_VERSION].
      */
     @Synchronized
-    fun load(sessionId: String): SessionSnapshot? {
-        val file = fileOf(sessionId)
+    fun load(sessionId: String): SessionSnapshot? = read(fileOf(sessionId))
+
+    /**
+     * Reads any snapshot file of the directory — a current snapshot, a backup or a deleted one —
+     * with the same migration and clean up as [load]; `null` when it is missing or corrupt.
+     */
+    @Synchronized
+    fun loadFile(file: File): SessionSnapshot? = read(file)
+
+    private fun read(file: File): SessionSnapshot? {
         if (!file.isFile) return null
         return try {
             val document = json.parseToJsonElement(file.readText(StandardCharsets.UTF_8)) as? JsonObject ?: return null
             val version = document[SessionSnapshotMigrators.SCHEMA_VERSION_FIELD]?.jsonPrimitive?.int ?: return null
             val migrated = SessionSnapshotMigrators.migrate(document, version)
             if (migrated == null) {
-                log.info("Dropping the snapshot of $sessionId: schema version $version cannot be migrated")
+                log.info("Dropping the snapshot ${file.name}: schema version $version cannot be migrated")
                 return null
             }
             val snapshot = json.decodeFromJsonElement(SessionSnapshot.serializer(), migrated)
             snapshot.copy(entries = withoutPromptAttachments(snapshot.entries))
         } catch (e: Exception) {
-            log.warn("Failed to read the session snapshot of $sessionId", e)
+            log.warn("Failed to read the session snapshot ${file.name}", e)
             null
         }
     }
@@ -227,6 +233,102 @@ class SessionSnapshotStore(
         }
     }
 
+    /**
+     * Copies the current snapshot of [sessionId] to `{id}.json.{epochMillis}.backup` before a
+     * replay overwrites it; `null` when there is nothing to protect or the copy failed.
+     */
+    @Synchronized
+    fun backup(sessionId: String): File? {
+        val source = fileOf(sessionId)
+        if (!source.isFile) return null
+        return try {
+            var timestamp = clock()
+            var target = siblingOf(sessionId, timestamp, BACKUP_SUFFIX)
+            while (target.exists()) {
+                timestamp += 1
+                target = siblingOf(sessionId, timestamp, BACKUP_SUFFIX)
+            }
+            Files.copy(source.toPath(), target.toPath())
+            target
+        } catch (e: Exception) {
+            log.warn("Failed to back up the session snapshot of $sessionId", e)
+            null
+        }
+    }
+
+    /**
+     * Settles [backup] once the replay has overwritten the snapshot of [sessionId].
+     *
+     * When the replay holds the same conversation ([sameTranscript]), the local record wins: it
+     * carries what a replay cannot reproduce (stop reasons, error notices, attachment chips, ...),
+     * so [backup] is moved back to `{id}.json` with the agent's new last update time and returned,
+     * for the caller to redraw it. A backup that differs is kept as is and `null` is returned.
+     */
+    @Synchronized
+    fun restoreBackupIfSame(sessionId: String, backup: File): SessionSnapshot? {
+        val before = read(backup) ?: return null
+        val after = read(fileOf(sessionId)) ?: return null
+        if (!sameTranscript(before.entries, after.entries)) return null
+        val restored = before.copy(
+            sessionId = sessionId,
+            savedAt = clock(),
+            agentUpdatedAt = after.agentUpdatedAt ?: before.agentUpdatedAt,
+            title = after.title ?: before.title,
+        )
+        return try {
+            write(restored)
+            deleteQuietly(backup)
+            restored
+        } catch (e: Exception) {
+            log.warn("Failed to put the local snapshot of $sessionId back", e)
+            null
+        }
+    }
+
+    /** Keeps the [keep] newest backups of [sessionId] and deletes the older ones. */
+    @Synchronized
+    fun pruneBackups(sessionId: String, keep: Int = MAX_BACKUPS) {
+        val backups = LocalSessionIndex.scan(directory).of(sessionId)?.backups ?: return
+        backups.drop(keep.coerceAtLeast(0)).forEach { deleteQuietly(it.file) }
+    }
+
+    /**
+     * Deletes a session locally without losing it: the snapshot is renamed to
+     * `{id}.json.{epochMillis}.deleted` first, and its backups are only dropped once that worked,
+     * so a failure never leaves the session without any local copy.
+     */
+    @Synchronized
+    fun moveToDeleted(sessionId: String) {
+        val source = fileOf(sessionId)
+        if (!source.isFile) return
+        try {
+            var timestamp = clock()
+            var target = siblingOf(sessionId, timestamp, DELETED_SUFFIX)
+            while (target.exists()) {
+                timestamp += 1
+                target = siblingOf(sessionId, timestamp, DELETED_SUFFIX)
+            }
+            moveAtomically(source.toPath(), target.toPath())
+        } catch (e: Exception) {
+            log.warn("Failed to move the session snapshot of $sessionId aside", e)
+            return
+        }
+        LocalSessionIndex.scan(directory).of(sessionId)?.backups?.forEach { deleteQuietly(it.file) }
+    }
+
+    /** Lists the directory once; see [LocalSessionIndex]. */
+    @Synchronized
+    fun index(): LocalSessionIndex = LocalSessionIndex.scan(directory)
+
+    private fun deleteQuietly(file: File) {
+        if (file.exists() && !file.delete()) {
+            log.warn("Failed to delete ${file.name}")
+        }
+    }
+
+    private fun siblingOf(sessionId: String, timestamp: Long, suffix: String): File =
+        File(directory, "${sanitize(sessionId)}.json.$timestamp.$suffix")
+
     /** `ATOMIC_MOVE` is unsupported on a few file systems, where a plain replace is the best effort. */
     private fun moveAtomically(source: Path, target: Path) {
         try {
@@ -239,12 +341,70 @@ class SessionSnapshotStore(
 
     private fun fileOf(sessionId: String): File = File(directory, "${sanitize(sessionId)}.json")
 
-    private fun sanitize(sessionId: String): String = sessionId.replace(ILLEGAL_FILENAME_CHARS, "_")
-
     companion object {
         const val SESSIONS_SUBDIRECTORY: String = "sandbox-agent-sessions"
 
+        /** Backups kept per session; older ones are dropped by [pruneBackups]. */
+        const val MAX_BACKUPS: Int = 20
+
+        private const val BACKUP_SUFFIX = "backup"
+        private const val DELETED_SUFFIX = "deleted"
+
         private val ILLEGAL_FILENAME_CHARS = Regex("[^A-Za-z0-9_.-]")
+
+        /** File name stem of [sessionId]; also the key of [LocalSessionIndex]. */
+        internal fun sanitize(sessionId: String): String = sessionId.replace(ILLEGAL_FILENAME_CHARS, "_")
+
+        /**
+         * Same conversation as far as a replay can reproduce it: the [replayableOutline]s of both
+         * transcripts are equal, entry by entry.
+         */
+        internal fun sameTranscript(before: List<TranscriptEntry>, after: List<TranscriptEntry>): Boolean =
+            replayableOutline(before) == replayableOutline(after)
+
+        /** One step of a [replayableOutline]. */
+        internal sealed interface OutlineItem {
+            data class User(val text: String) : OutlineItem
+            data class Agent(val text: String) : OutlineItem
+            data class Tool(val toolCallId: String) : OutlineItem
+        }
+
+        /**
+         * The part of a transcript a live turn and its replay both produce.
+         *
+         * - prompts and agent messages by their text (trimmed; consecutive agent messages are
+         *   joined, since a thought in between splits them differently live and on replay);
+         * - tool calls by their id only, their final status and content may differ.
+         *
+         * Turn boundaries are left out: a live turn ends with a [NoticeEntry] carrying the stop
+         * reason, while a replay records a single [TurnEndEntry] after all of its turns, so the
+         * two never line up. Every turn starts with a prompt anyway, which keeps the number and
+         * the order of the turns in the outline. Thoughts, plans, notices and attachment chips are
+         * left out too: a replay never reports them the same way, and they are exactly what the
+         * local record adds.
+         */
+        internal fun replayableOutline(entries: List<TranscriptEntry>): List<OutlineItem> {
+            val outline = mutableListOf<OutlineItem>()
+            for (entry in entries) {
+                val item: OutlineItem = when (entry) {
+                    is UserMessageEntry -> OutlineItem.User(entry.text.trim())
+                    is AgentMessageEntry -> {
+                        val text = entry.text.filterNot(Char::isWhitespace)
+                        val last = outline.lastOrNull()
+                        if (last is OutlineItem.Agent) {
+                            outline[outline.lastIndex] = OutlineItem.Agent(last.text + text)
+                            continue
+                        }
+                        OutlineItem.Agent(text)
+                    }
+                    is ToolCallEntry -> OutlineItem.Tool(entry.toolCall.toolCallId)
+                    is NoticeEntry, TurnEndEntry, is ThoughtEntry, is PlanSnapshotEntry -> continue
+                }
+                if (item is OutlineItem.Agent && item.text.isEmpty()) continue
+                outline += item
+            }
+            return outline
+        }
 
         /**
          * Cache directory of [project] holding its snapshots. `getProjectCachePath` keys the

@@ -28,14 +28,15 @@ Development leveraging AI agents faces several challenges:
 │ │  ├─ Chat Stream / Thinking Log / Tool Cards                        │ │
 │ │  ├─ Context Visualization Chips (Current File, Selection, Closeable)│ │
 │ │  ├─ Inline Permission Cards (Diff Summary / Command Approval)      │ │
-│ │  └─ Session History (Switch / Rename / Delete)                     │ │
+│ │  ├─ Session History (Switch / Rename / Delete / Backups)           │ │
+│ │  └─ Local Session Search / Read Only Tabs                          │ │
 │ └─────────────────────────────────┬──────────────────────────────────┘ │
 │                                   │                                    │
 │ ┌─────────────────────────────────┴──────────────────────────────────┐ │
 │ │ Plugin Core                                                        │ │
 │ │  ├─ ACP Client (JSON-RPC 2.0 over stdio) + Traffic Logger          │ │
 │ │  ├─ Sandbox Process Manager (Attach Command Execution & stdio)     │ │
-│ │  ├─ Session Store (History Metadata / Conversation Snapshots)      │ │
+│ │  ├─ Session Store (Metadata / Snapshots / Backups / Deleted)       │ │
 │ │  ├─ Workspace Guard (Editor Lock / VFS Refresh)                    │ │
 │ │  ├─ Context Extractor (Explicit Context Collection Control)        │ │
 │ │  └─ Native Diff Integrator (Full Diff View from Card / Tool Card)  │ │
@@ -165,10 +166,11 @@ To prevent sensitive information from being unintentionally transmitted to exter
   * Effort (`category = thought_level` / `id = effort`) exists as a `configOptions` selector only, so it is hidden unless the agent reports it. Every remaining option (e.g. `fast`) is drawn dynamically after the fixed slots, keyed by its `configId`, so an option the plugin knows nothing about is still offered and disappears again once it is no longer reported.
   * The `configOptions` state of `session/new` / `session/load` / `session/resume` and of the `config_option_update` notification is the **whole** state and replaces the cached one; the answer of `session/set_config_option` is **partial** (it reports `mode` / `model` only) and is merged into it, so the options missing from it keep their selector.
   * Token usage is shown only when `usage_update` is received, formatted as a read-only icon with breakdown details on hover.
-* **Options Menu (Tool Window Header)**: The `Options` menu of the tool window (the rotated ellipsis at the left end of the header, next to platform entries such as `Show Toolbar`) carries two entries of the plugin, added through `ToolWindowEx.setAdditionalGearActions`:
+* **Options Menu (Tool Window Header)**: The `Options` menu of the tool window (the rotated ellipsis at the left end of the header, next to platform entries such as `Show Toolbar`) carries three entries of the plugin, added through `ToolWindowEx.setAdditionalGearActions` in this order, with a separator before `Settings`:
+  * `Search Local Sessions` (`AllIcons.Actions.Search`) — opens the local session search popup (see §4.4).
   * `Open Sandbox Terminal` (`icons/console.svg`) — logs into the sandbox with the configured login shell (see §3.2).
   * `Settings` (`icons/settings.svg`) — opens `Settings > Tools > Sandbox Agent Connector` directly.
-  * Both are registered as regular actions (`com.tsuty.sandboxagent.actions.OpenSandboxTerminal` / `...OpenSandboxAgentSettings`), so they are reachable through Find Action and can be bound to a shortcut in Keymap.
+  * All of them are registered as regular actions (`com.tsuty.sandboxagent.actions.SearchLocalSessions` / `...OpenSandboxTerminal` / `...OpenSandboxAgentSettings`), so they are reachable through Find Action and can be bound to a shortcut in Keymap (none has a default shortcut).
 * **Interruption**: During turn execution, the `Send` button switches to `Stop`, sending `session/cancel` upon click (not a separate button).
 * **Prompt Input Area (Key UX Requirements)**:
   * **Dynamic Height Adjustment**:
@@ -199,22 +201,40 @@ To prevent sensitive information from being unintentionally transmitted to exter
 ### 4.3. Session Management (History, Restoration, and Persistence)
 Sessions are managed across two layers: the agent-side context and the IDE-side visual state (transcript). Even if the agent does not retain history, the IDE visual history can still be restored.
 
-* **Session Listing**: For agents supporting `sessionCapabilities.list`, the session list is retrieved via `session/list` and shown in a history popup when clicking the session title on a tab. The selected session is restored into that very tab (each tab owns its own connection, Ph2 §2). Entries are ordered by last update, newest first, and the popup is at most 20 rows tall and at most as wide as the plugin panel; older sessions are reached by scrolling rather than being dropped from the list, and titles that do not fit the width are elided with the full one kept as the row tooltip.
-* **Restoration Strategy**: Determined by combining agent capabilities and local snapshot freshness.
+* **Session Listing**: For agents supporting `sessionCapabilities.list`, the session list is retrieved via `session/list` and shown in a history popup when clicking the session title on a tab. The selected session is restored into that very tab (each tab owns its own connection, Ph2 §2). Entries are ordered by last update, newest first, and the popup is at most 20 rows tall and at most as wide as the plugin panel; older sessions are reached by scrolling rather than being dropped from the list, and titles that do not fit the width are elided (`…`). Only sessions reported by `session/list` are listed; a session that exists only locally is reached through the local session search (§4.4).
+  * **Row**: storage-state icon, title and the time since the last update, right aligned at the end of the row. The session open in this tab is marked with `AllIcons.Vcs.History` instead; every other row shows where it is stored: `AllIcons.Nodes.Folder` (local snapshot), `AllIcons.Nodes.CopyOfFolder` (local snapshot with backups) or `AllIcons.Nodes.ExtractedFolder` (reported by `session/list` only).
+  * **Tooltip**: the full title, and under it the session ID in small muted text.
+  * **Row actions**: clicking a row restores the session into the tab. Resting the pointer on any row but the open one for about 250 ms opens a submenu next to it with `Rename` / `Delete` and, when the session has backups, `Backups ▶`, which lists them newest first as `{localized date and time} {size in KB, rounded up}`; choosing one opens it in a Read Only tab (§4.4). The submenu has no title, since the row it belongs to stays highlighted. The row carries no ▶ or ⋮ marker and has no right-click menu (the right-click `Rename` / `Delete` menu of the tab itself is kept, §4.2).
+* **Restoration Strategy**: Determined by combining agent capabilities and whether a local snapshot with at least one entry exists.
 
   | Agent Capability | Local Snapshot | Behavior |
   | :--- | :--- | :--- |
-  | Supports `resume` | Fresh | Renders snapshot and reconnects context via `session/resume` |
-  | Supports `load` only | Fresh | Renders snapshot and reconnects via `session/load` with replay suppressed |
-  | Supports `load` / `resume` | Stale or None | Renders live replay from `session/load` and saves a fresh snapshot upon completion |
+  | Supports `resume` | Present | Renders snapshot and reconnects context via `session/resume` |
+  | Supports `load` only | Present | Renders snapshot and reconnects via `session/load` with replay suppressed |
+  | Supports `load` / `resume` | None or empty | Renders live replay from `session/load` and saves a snapshot upon completion |
   | Unsupported | Present | Renders snapshot only (visual restoration; notifies user that agent has no context) |
   | Unsupported | None | Rejects selection and retains current session |
 
 * **Transcript Snapshots**: Persists visual state (messages with merged chunks, finalized tool calls, Plans, notifications) as JSON at turn boundaries. Stored under the IDE's per-project cache directory at `sandbox-agent-sessions/{sessionId}.json` (outside the project tree, not tracked in VCS). Writes use atomic moves via temporary files to avoid corrupted snapshots upon interruption.
 * **Schema Version**: Snapshots include `schemaVersion` (currently 1). Versions without a migration path are discarded as "no local history" (preventing load failures from breaking connections).
-* **Freshness Check**: Snapshots record save timestamps and the agent's reported last updated timestamp at that time, comparing them against `session/list` updated timestamps to decide if replay is necessary. If the agent does not report timestamps, the snapshot is used.
-* **Rename / Delete**: Since ACP lacks `session/rename`, renames are stored in `workspace.xml` as IDE-side title overrides, taking precedence over titles reported by the agent. Deletion issues `session/delete` (when supported; continues even if it fails) and always discards local snapshots and metadata.
+* **Local Record First (Local Session Protection)**: A replay from the agent never replaces what was recorded locally. Whenever the local snapshot holds at least one entry it is drawn as is, and a replay only happens for a session without local history. Update times are not compared: the agent moves the last update time of a session on a mere `session/load` / `session/resume`, so it cannot tell whether the conversation changed. Snapshots still record their save time and the last update time the agent reported, for information only.
+* **Backups**: Backups `{sessionId}.json.{epochMillis}.backup` (up to 20 per session, the oldest removed first) are listed and opened as Read Only tabs. The store can compare a backup with the current snapshot on what a replay reproduces only — prompts and agent messages by their text and tool calls by their ID; turn boundaries, thoughts, plans, notices and attachment chips are ignored, since a live turn ends with a stop-reason notice while a replay records a single `turn_end` after all of its turns — and put the local record back when they are equal. Since a session with local history is never replayed, restoring a session no longer makes backups.
+* **Rename / Delete**: Since ACP lacks `session/rename`, renames are stored in `workspace.xml` as IDE-side title overrides, taking precedence over titles reported by the agent. Deletion issues `session/delete` (when supported; continues even if it fails) and discards the metadata, but the local snapshot is not erased: it is renamed to `{sessionId}.json.{epochMillis}.deleted` (nothing happens when there is none), and only then are the backups of the session removed, so a failed move never leaves nothing behind. Deleted sessions never appear in the session list; they are reached through the local session search only.
+* **Local Index**: The storage state shown in the list comes from a single listing of the snapshot directory each time the popup opens. Only three file name forms are recognized — `{id}.json`, `{id}.json.{epochMillis}.backup` and `{id}.json.{epochMillis}.deleted` — and anything else (for example the `.tmp` file of an interrupted write) is ignored. File operation failures are only logged, as for the snapshots themselves.
 * **Discarding Unused Sessions**: Sessions that have never received a prompt are discarded when switching to another session, preventing empty sessions from accumulating on the agent.
+
+### 4.4. Read Only Tabs & Local Session Search
+* **Read Only Tab**: A backup or a deleted snapshot is opened in a tab of its own that restores the transcript from that file and never connects to the sandbox.
+  * It is opened from `Backups ▶` of the session list (§4.3) or by choosing a backup / deleted result of the local session search, and it counts toward the limit of 10 tabs shared with the regular ones; when the limit is reached nothing is opened and a notification says so.
+  * The tab icon is `disconnected.svg` with `readonly.svg` layered over it, with no pulse and no permission mark, and clicking it does not connect. The title is the local rename, else the snapshot `title`, else the session ID.
+  * Left out: the title caret and session list, the right-click menu of the tab, `New Session`, the prompt input, the context chips and the whole prompt action bar. The status label reads `Backup · {date and time}` or `Deleted · {date and time}`.
+  * The transcript search works as usual. The tab can be closed; its state is not persisted, it takes no duplicate-open lock, and the same file may be open in several tabs.
+* **Local Session Search**: `Search Local Sessions` of the options menu (§4.2) opens a popup centered in the tool window (the tool window is activated first when it is hidden); the action is disabled without a project.
+  * The popup has a search field (incremental), an `Include deleted sessions` checkbox, the results, and under them a preview of the selected result.
+  * The raw JSON text of the local files is matched case-insensitively as a substring: `.json` and `.backup` files, plus `.deleted` ones when the checkbox is on (`.tmp` never). Every search runs off the EDT with a debounce of about 200 ms, a newer query cancels the previous search, and nothing is cached. Because the raw text is matched, escapes such as `\n` or `\"` can be part of a match.
+  * A result row shows the kind icon (as in the session list, `AllIcons.Actions.GC` for a deleted file), the title (the snapshot `title`, else the session ID) and, for a backup or a deleted file, its kind and date.
+  * **Preview**: the first transcript entry of the selected file that contains the query is pretty printed as JSON (or, when no entry matches, the matching top-level field such as `title`). Strings keep their JSON escapes, so what is shown is what was matched; a line longer than 160 characters keeps its key and the part around the match, cut with `…`. Every match is highlighted with the editor search result color and the preview scrolls to the first one. It is read off the EDT, and a preview overtaken by a newer selection is dropped. A file that cannot be parsed falls back to a one-line snippet around the match.
+  * **Opening a result**: a `.json` result is restored in the active tab when it is `Ready`; otherwise a new tab is added and the session is restored once it has connected. A `.backup` / `.deleted` result opens in a Read Only tab.
 
 ---
 

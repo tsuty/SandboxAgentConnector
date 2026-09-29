@@ -106,19 +106,20 @@ object SandboxAgentIcons {
      *
      * The markup is a file of the ACP registry, kept in the settings and already cut down to its
      * shapes (`AgentIcon`), so it keeps the colors it was drawn with; what it leaves to the text
-     * around it is resolved against the theme (see [themed]).
+     * around it is resolved against the theme (see [themed]) — or painted in [color], the one the
+     * settings give the agent (`AgentColors`), whenever there is one.
      *
      * The icon measures [SIZE] like every bundled one, but the drawing itself is scaled into
      * [AGENT_SIZE] and sits in the lower left corner of that box: the bundled pair paints its own
      * frame with a margin of the same kind, and the corner it leaves free is where the mark of the
      * agent goes (see [agentIcon]).
      */
-    fun agent(svg: String?): Icon? {
+    fun agent(svg: String?, color: String? = null): Icon? {
         val markup = svg?.takeIf { it.isNotBlank() } ?: return null
         // Rendered here and not only while painting: a markup the loader cannot read has to leave
         // the bundled pair in place instead of turning the button into an empty one.
-        raster(markup) ?: return null
-        return AgentImageIcon(markup)
+        raster(markup, color) ?: return null
+        return AgentImageIcon(markup, color)
     }
 
     /**
@@ -129,8 +130,8 @@ object SandboxAgentIcons {
      * [agent]), so the chip neither resizes itself when another agent is picked nor moves the
      * drawing when a mark comes and goes: a mark only ever occupies that free corner.
      */
-    fun agentIcon(agentSvg: String?, mark: AgentMark): Icon {
-        val agent = agent(agentSvg) ?: Disconnected
+    fun agentIcon(agentSvg: String?, mark: AgentMark, color: String? = null): Icon {
+        val agent = agent(agentSvg, color) ?: Disconnected
         val overlay = when (mark) {
             AgentMark.NONE -> return agent
             AgentMark.DISCONNECTED -> DisconnectedStatus
@@ -140,6 +141,19 @@ object SandboxAgentIcons {
             setIcon(agent, 0)
             setIcon(overlay, 1)
         }
+    }
+
+    /** The mark of a Read Only tab, drawn over [Disconnected] (see [readOnlyTabIcon]). */
+    @JvmField
+    val Readonly: Icon = IconLoader.getIcon("/icons/readonly.svg", SandboxAgentIcons::class.java)
+
+    /**
+     * Icon of a Read Only tab: the bundled agent with the read-only mark over it. It never pulses
+     * nor carries another mark — such a tab has no agent behind it at all.
+     */
+    fun readOnlyTabIcon(): Icon = LayeredIcon(2).apply {
+        setIcon(Disconnected, 0)
+        setIcon(Readonly, 1)
     }
 
     /**
@@ -166,14 +180,14 @@ object SandboxAgentIcons {
  * like every other 16x16 icon — handing the raster to `JBImageIcon` instead reports the device
  * pixels as the size of the icon, which paints it twice as large on a HiDPI screen.
  */
-private class AgentImageIcon(private val svg: String) : Icon {
+private class AgentImageIcon(private val svg: String, private val color: String?) : Icon {
 
     override fun getIconWidth(): Int = JBUIScale.scale(SIZE)
 
     override fun getIconHeight(): Int = JBUIScale.scale(SIZE)
 
     override fun paintIcon(c: Component?, g: Graphics, x: Int, y: Int) {
-        val image = raster(svg) ?: return
+        val image = raster(svg, color) ?: return
         val box = JBUIScale.scale(SIZE)
         val drawn = JBUIScale.scale(AGENT_SIZE)
         val graphics = g.create() as Graphics2D
@@ -218,11 +232,11 @@ private class TranslucentIcon(private val delegate: Icon, private val alpha: Flo
  * A rasterization is far too expensive to repeat on every repaint of the connection button, and a
  * raster is only good for the scale it was made for and the color the theme gave it, so both are
  * part of the key: a moved window or a switched theme renders again instead of painting a drawing
- * made for the other one.
+ * made for the other one. A [chosen] color replaces the one of the theme (see `AgentColors`).
  */
-private fun raster(svg: String): Image? {
+private fun raster(svg: String, chosen: String? = null): Image? {
     val drawn = JBUIScale.scale(AGENT_SIZE)
-    val color = agentColor()
+    val color = chosen ?: agentColor()
     return rendered.computeIfAbsent("$drawn:$color:$svg") { render(svg, drawn, color) ?: MISSING }
         .takeIf { it !== MISSING }
 }

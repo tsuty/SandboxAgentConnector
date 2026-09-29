@@ -166,6 +166,35 @@ class TabsControllerTest {
     }
 
     @Test
+    fun `a tab can be added around a service created by the caller`() {
+        val disposed = mutableListOf<String>()
+        val controller = controller(disposed = disposed)
+        val readOnly = FakeResource("readOnly", disposed)
+
+        val tab = controller.addTab(readOnly)!!
+
+        assertSame(readOnly, tab.service)
+        assertEquals(0, controller.numberOf(tab))
+        controller.closeTab(tab)
+        assertEquals(listOf("panel", "readOnly"), disposed)
+    }
+
+    @Test
+    fun `tabs added with an outside service share the tab limit`() {
+        val disposed = mutableListOf<String>()
+        val controller = controller(disposed = disposed)
+        repeat(TabsController.MAX_TABS - 1) { controller.addTab() }
+        assertTrue(controller.addTab(FakeResource("readOnly", disposed)) != null)
+
+        assertFalse(controller.canAddTab)
+        assertNull(controller.addTab())
+        // A service turned away at the limit is disposed instead of leaking.
+        assertNull(controller.addTab(FakeResource("rejected", disposed)))
+        assertEquals(listOf("rejected"), disposed)
+        assertEquals(TabsController.MAX_TABS, controller.size)
+    }
+
+    @Test
     fun `dispose closes every open tab`() {
         val disposed = mutableListOf<String>()
         val controller = controller(disposed = disposed)

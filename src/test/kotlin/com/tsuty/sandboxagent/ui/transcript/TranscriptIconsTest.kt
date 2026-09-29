@@ -117,4 +117,22 @@ class TranscriptIconsTest {
         // The ids of an export still have to go: the sprite is one document.
         assertFalse(symbol.contains("uuid"), symbol)
     }
+
+    /** The color of the agent replaces the text color only, never a color the drawing chose. */
+    @Test
+    fun `an agent color paints what the drawing left uncolored`() {
+        val symbol = TranscriptIcons.agentSymbol(
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+              <path d="M4 4h16v16H4z" fill="currentColor"/>
+              <path d="M0 0h2v2H0z" fill="#D97757"/>
+            </svg>
+            """.trimIndent(),
+            "#74D664",
+        )
+
+        assertFalse(symbol.contains("currentColor", ignoreCase = true), symbol)
+        assertTrue(symbol.contains("""<symbol id="ra-icon-agent" viewBox="0 0 24 24" fill="#74D664">"""), symbol)
+        assertTrue(symbol.contains("""fill="#D97757""""), symbol)
+    }
 }

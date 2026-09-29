@@ -36,7 +36,16 @@
             shown as removable chips above the prompt, so you always see what is sent to the model.
             Auto-attach is off by default.</li>
         <li><b>Session history</b> &ndash; sessions can be listed, switched, renamed and deleted; transcripts are
-            snapshotted locally and restored via <code>session/load</code> / <code>session/resume</code>.</li>
+            snapshotted locally and restored via <code>session/load</code> / <code>session/resume</code>.
+            Each row of the list tells at a glance whether the session is stored locally and has backups.</li>
+        <li><b>Local session protection</b> &ndash; the local transcript is never lost to the agent: a session with
+            local history is always restored from it, never overwritten by a replay of the agent history, and
+            deleting a session moves its transcript aside instead of erasing it. Backups and deleted sessions
+            open in a <b>Read Only tab</b> that never connects to the sandbox.</li>
+        <li><b>Local session search</b> &ndash; <code>Search Local Sessions</code> in the tool window options menu
+            searches the full text of every locally stored session, its backups and, on request, deleted ones.
+            The matching part is previewed as pretty printed JSON with the match highlighted; a result reopens
+            the session or opens it in a Read Only tab.</li>
         <li><b>Safe turns</b> &ndash; in-memory documents are flushed before a turn, the workspace is optionally
             locked read-only in the IDE while the agent works, and changed paths are refreshed in the VFS afterwards.</li>
         <li><b>Sandbox terminal</b> &ndash; <code>Open Sandbox Terminal</code> logs into the very same sandbox in a
@@ -77,6 +86,13 @@
         <li>Context chips for the active file, the selection and manually attached files, with auto-attach off by default.</li>
         <li>Optional read-only workspace lock during a turn and automatic VFS refresh of sandbox-side changes.</li>
         <li><code>Open Sandbox Terminal</code>: a login shell in the same sandbox, opened in a terminal tab of the IDE.</li>
+        <li>Local session protection: a session with local history is always restored from it instead of being
+            replayed over, and deletion moves the transcript aside.</li>
+        <li>Session list with storage-state icons (local / local with backups / agent only), a full-title tooltip
+            and a hover submenu with <code>Rename</code> / <code>Delete</code> / <code>Backups</code>.</li>
+        <li>Read Only tabs for backups and deleted sessions: no connection, no prompt, transcript search included.</li>
+        <li><code>Search Local Sessions</code>: full text search over the local sessions (deleted ones optional)
+            with a pretty printed JSON preview of the match.</li>
         <li>Per-session ACP traffic log under the IDE log directory.</li>
         <li>Settings page under <code>Tools &rarr; Sandbox Agent Connector</code> for the sandbox type and name,
             the login shell, the ACP agent (from the ACP registry; a <code>binary</code> distribution is started
@@ -142,9 +158,14 @@
             <keyboard-shortcut keymap="$default" first-keystroke="shift ENTER"/>
         </action>
 
-        <!-- Both are put into the `Options` menu of the tool window header by
+        <!-- These are put into the `Options` menu of the tool window header by
              SandboxAgentToolWindowFactory; they are registered here so they can be found and bound
              to a shortcut like any other action. -->
+        <action id="com.tsuty.sandboxagent.actions.SearchLocalSessions"
+                class="com.tsuty.sandboxagent.actions.SearchLocalSessionsAction"
+                icon="AllIcons.Actions.Search"
+                text="Search Local Sessions"
+                description="Searches the text of the sessions stored locally, backups and deleted ones included"/>
         <action id="com.tsuty.sandboxagent.actions.OpenSandboxTerminal"
                 class="com.tsuty.sandboxagent.actions.OpenSandboxTerminalAction"
                 icon="/icons/console.svg"
@@ -155,5 +176,10 @@
                 icon="/icons/settings.svg"
                 text="Settings"
                 description="Opens the settings page of the Sandbox Agent Connector plugin"/>
+        <action id="com.tsuty.sandboxagent.actions.OpenCacheDirectory"
+                class="com.tsuty.sandboxagent.actions.OpenCacheDirectoryAction"
+                icon="AllIcons.General.OpenDisk"
+                text="Open Cache Directory"
+                description="Opens the directory the local session cache of this project is stored in"/>
     </actions>
 </idea-plugin>

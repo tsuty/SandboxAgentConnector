@@ -11,6 +11,8 @@ While leveraging the IDE's lightweight nature and rich GUI (editor, Diff viewers
 - **Secure Sandbox Isolation**: File read/write operations and command executions by the agent are entirely confined within the sandbox, preventing unintended destruction of the local development environment or exposure of sensitive information.
 - **IDE-Native UI**: Provides an intuitive user experience with in-tool-window chat streaming, thinking log display, tool execution cards, and context attachment chips. The transcript is rendered by an embedded browser (JCEF), so Markdown, tables and code blocks look like the IDE Markdown preview.
 - **Inline Approval**: Preview file changes (compact Diff / full Diff) and pre-verify command executions, executing them only after explicit user approval.
+- **Local Session Protection**: Transcripts are kept locally and are never lost to the agent. A session with local history is always restored from it, never overwritten by a replay of the agent history, and deleting a session moves its transcript aside instead of erasing it. The session list shows at a glance whether a session is stored locally and has backups, and a backup or a deleted session opens in a **Read Only tab** that never connects to the sandbox.
+- **Local Session Search**: `Search Local Sessions` in the tool window options menu searches the full text of the locally stored sessions and their backups, deleted sessions included on request. The matching part is previewed as pretty printed JSON with the match highlighted, and a result reopens the session or opens it in a Read Only tab.
 - **ACP (Agent Client Protocol) Compliant**: Complies with JSON-RPC 2.0-based ACP v1, enabling connections to ACP-compatible agents such as Claude Code.
 
 ---

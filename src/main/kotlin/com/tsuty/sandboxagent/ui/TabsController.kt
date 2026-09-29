@@ -66,7 +66,19 @@ class TabsController<S : Disposable, P : Disposable>(
      */
     fun addTab(): SandboxAgentTab<S, P>? {
         if (!canAddTab) return null
-        val service = serviceFactory()
+        return addTab(serviceFactory())
+    }
+
+    /**
+     * Adds a tab around a [service] created by the caller (a Read Only tab's service, which the
+     * factory cannot build). Shares [maxTabs] with [addTab]; when the limit is reached [service]
+     * is disposed right away and `null` is returned, so it never leaks.
+     */
+    fun addTab(service: S): SandboxAgentTab<S, P>? {
+        if (!canAddTab) {
+            Disposer.dispose(service)
+            return null
+        }
         val panel = panelFactory(service)
         val tab = SandboxAgentTab(idSeq.incrementAndGet(), service, panel)
         _tabs += tab
