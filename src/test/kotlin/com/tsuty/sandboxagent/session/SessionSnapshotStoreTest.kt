@@ -94,16 +94,14 @@ class SessionSnapshotStoreTest {
     }
 
     @Test
-    fun `delete removes the snapshot file`() {
+    fun `readText returns the raw file or null`() {
         val (store, directory) = tempStore()
         store.save("sess_1", listOf(UserMessageEntry("hi")))
 
-        store.delete("sess_1")
+        val text = assertNotNull(store.readText(File(directory, "sess_1.json")))
 
-        assertTrue(directory.listFiles().orEmpty().isEmpty())
-        assertNull(store.load("sess_1"))
-        // Deleting twice is a no-op, not a failure.
-        store.delete("sess_1")
+        assertTrue(text.contains("\"text\":\"hi\""), text)
+        assertNull(store.readText(File(directory, "sess_missing.json")))
     }
 
     @Test

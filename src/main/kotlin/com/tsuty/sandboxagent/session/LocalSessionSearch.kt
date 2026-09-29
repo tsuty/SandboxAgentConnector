@@ -13,8 +13,6 @@ data class LocalSessionSearchResult(
     val file: LocalSessionFile,
     val sessionId: String,
     val title: String,
-    /** Text around the first match, on one line, cut with `…` where the file goes on. */
-    val snippet: String,
 )
 
 /**
@@ -33,7 +31,7 @@ data class LocalSessionPreview(val text: String, val matches: List<IntRange>)
  */
 object LocalSessionSearch {
 
-    /** Characters shown on each side of the match in [LocalSessionSearchResult.snippet]. */
+    /** Characters shown on each side of the match in a [snippet]. */
     const val SNIPPET_RADIUS: Int = 40
 
     /** Longest line of a [preview]; a longer one keeps its key and the part around the match. */
@@ -45,6 +43,7 @@ object LocalSessionSearch {
     /**
      * Files of [files] containing [query], newest first. [isCancelled] is polled between files so
      * a search overtaken by the next keystroke stops early; a file that cannot be read is skipped.
+     * The match itself is shown by [preview], once a result is selected.
      */
     fun search(
         files: List<LocalSessionFile>,
@@ -58,10 +57,9 @@ object LocalSessionSearch {
         for (file in files.sortedByDescending { it.timestamp ?: it.file.lastModified() }) {
             if (isCancelled()) return emptyList()
             val text = read(file.file) ?: continue
-            val at = text.indexOf(needle, ignoreCase = true)
-            if (at < 0) continue
+            if (!text.contains(needle, ignoreCase = true)) continue
             val (sessionId, title) = identify(text, file.sanitizedId)
-            results += LocalSessionSearchResult(file, sessionId, title, snippet(text, at, needle.length))
+            results += LocalSessionSearchResult(file, sessionId, title)
         }
         return results
     }

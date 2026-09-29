@@ -244,7 +244,7 @@ object SessionHistoryPopup {
         service.refreshSessions()
         val entries = service.sessions.sortedByDescending { it.lastUpdatedMillis ?: 0 }
         // One listing of the directory for the whole popup, not one lookup per row.
-        val index = runCatching { LocalSessionIndex.scan(SessionSnapshotStore.directoryFor(project)) }
+        val index = runCatching { SessionSnapshotStore.forProject(project).index() }
             .getOrDefault(LocalSessionIndex.EMPTY)
         val step = SessionHistoryPopupStep(
             entries,

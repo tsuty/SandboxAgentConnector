@@ -209,7 +209,7 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         }
         ApplicationManager.getApplication().executeOnPooledThread {
             val snapshot = runCatching {
-                SessionSnapshotStore(SessionSnapshotStore.directoryFor(project)).loadFile(file.file)
+                SessionSnapshotStore.forProject(project).loadFile(file.file)
             }.getOrNull()
             onEdt {
                 if (disposed) return@onEdt

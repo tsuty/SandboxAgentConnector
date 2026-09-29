@@ -32,7 +32,6 @@ class LocalSessionSearchTest {
 
         assertEquals(listOf("sess_1"), results.map { it.sessionId })
         assertEquals("Parser", results.single().title)
-        assertTrue(results.single().snippet.contains("PARSER bug"), results.single().snippet)
     }
 
     @Test

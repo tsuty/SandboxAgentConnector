@@ -22,7 +22,6 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.util.Alarm
 import com.intellij.util.ui.JBUI
-import com.tsuty.sandboxagent.session.LocalSessionIndex
 import com.tsuty.sandboxagent.session.LocalSessionKind
 import com.tsuty.sandboxagent.session.LocalSessionPreview
 import com.tsuty.sandboxagent.session.LocalSessionSearch
@@ -34,7 +33,6 @@ import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
-import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.DefaultListModel
 import javax.swing.JComponent
@@ -143,7 +141,7 @@ internal class LocalSessionSearchPopup private constructor(
             return
         }
         previewAlarm.addRequest({
-            val text = runCatching { result.file.file.readText(StandardCharsets.UTF_8) }.getOrNull()
+            val text = runCatching { SessionSnapshotStore.forProject(project).readText(result.file.file) }.getOrNull()
             val found = text?.let { LocalSessionSearch.preview(it, query) }
             ApplicationManager.getApplication().invokeLater(
                 { if (previewGeneration.get() == current && !popup.isDisposed) showPreview(found) },
@@ -181,10 +179,9 @@ internal class LocalSessionSearchPopup private constructor(
 
     private fun runSearch(query: String, includeDeleted: Boolean, current: Int) {
         val isCancelled = { generation.get() != current }
-        val files = runCatching { LocalSessionIndex.scan(SessionSnapshotStore.directoryFor(project)) }
-            .getOrDefault(LocalSessionIndex.EMPTY)
-            .searchable(includeDeleted)
-        val results = LocalSessionSearch.search(files, query, isCancelled)
+        val store = runCatching { SessionSnapshotStore.forProject(project) }.getOrNull()
+        val files = store?.index()?.searchable(includeDeleted).orEmpty()
+        val results = LocalSessionSearch.search(files, query, isCancelled) { file -> store?.readText(file) }
         if (isCancelled()) return
         ApplicationManager.getApplication().invokeLater(
             { if (!isCancelled() && !popup.isDisposed) show(results, query, "No local session contains \"$query\"") },

@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.ConcurrentHashMap
 
 /** Schema version written by this plugin version; see [SessionSnapshotMigrators]. */
 const val SESSION_SNAPSHOT_SCHEMA_VERSION: Int = 1
@@ -225,13 +226,14 @@ class SessionSnapshotStore(
             promptTextWithoutAttachments(entry.text)?.let { entry.copy(text = it) }
         }
 
+    /**
+     * Raw text of a file of the directory, as the local session search matches it; `null` when it
+     * is missing or unreadable. Read under the same lock as the writes, so a file being replaced or
+     * moved aside is never read half way.
+     */
     @Synchronized
-    fun delete(sessionId: String) {
-        val file = fileOf(sessionId)
-        if (file.exists() && !file.delete()) {
-            log.warn("Failed to delete the session snapshot of $sessionId")
-        }
-    }
+    fun readText(file: File): String? =
+        if (!file.isFile) null else runCatching { file.readText(StandardCharsets.UTF_8) }.getOrNull()
 
     /**
      * Copies the current snapshot of [sessionId] to `{id}.json.{epochMillis}.backup` before a
@@ -341,7 +343,6 @@ class SessionSnapshotStore(
     @Synchronized
     fun index(): LocalSessionIndex = LocalSessionIndex.scan(directory)
 
-
     private fun siblingOf(sessionId: String, timestamp: Long, suffix: String): File =
         File(directory, "${sanitize(sessionId)}.json.$timestamp.$suffix")
 
@@ -360,6 +361,17 @@ class SessionSnapshotStore(
     companion object {
         const val SESSIONS_SUBDIRECTORY: String = "sandbox-agent-sessions"
 
+        private val shared = ConcurrentHashMap<String, SessionSnapshotStore>()
+
+        /**
+         * The one store of the snapshot directory of [project]. Every tab, the session list and
+         * the local session search go through it: its methods are synchronized on the instance,
+         * so a second store on the same directory would read and move files without that lock.
+         */
+        fun forProject(project: Project): SessionSnapshotStore {
+            val directory = directoryFor(project).absoluteFile
+            return shared.computeIfAbsent(directory.path) { SessionSnapshotStore(directory) }
+        }
 
         private const val BACKUP_SUFFIX = "backup"
         private const val DELETED_SUFFIX = "deleted"

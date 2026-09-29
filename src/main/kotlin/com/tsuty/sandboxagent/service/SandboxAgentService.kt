@@ -435,7 +435,7 @@ class SandboxAgentService(
 
     /** Created lazily: the directory resolves IDE paths, which light tests do not have. */
     private val snapshotStore: SessionSnapshotStore by lazy {
-        SessionSnapshotStore(SessionSnapshotStore.directoryFor(project))
+        SessionSnapshotStore.forProject(project)
     }
 
 
