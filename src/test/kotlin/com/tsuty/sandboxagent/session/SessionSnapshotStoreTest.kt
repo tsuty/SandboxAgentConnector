@@ -194,11 +194,11 @@ class SessionSnapshotStoreTest {
     @Test
     fun `an unchanged replay keeps the local record and makes no backup`() {
         val (store, directory) = tickingStore()
-        val live = listOf(UserMessageEntry("a"), AgentMessageEntry("b"), NoticeEntry("Turn finished"))
+        val live = listOf(UserMessageEntry("a"), AgentMessageEntry("b", "m1"), NoticeEntry("Turn finished"))
         store.save("sess_1", live, agentUpdatedAt = 10L, title = "Old")
         val before = assertNotNull(store.load("sess_1"))
 
-        val replayed = listOf(UserMessageEntry("a"), AgentMessageEntry("b"), TurnEndEntry)
+        val replayed = listOf(UserMessageEntry("a"), AgentMessageEntry("b", "m1"), TurnEndEntry)
         assertNull(store.replaceIfChanged("sess_1", replayed, agentUpdatedAt = 20L, title = "New"))
 
         assertEquals(listOf("sess_1.json"), directory.names())
@@ -208,10 +208,10 @@ class SessionSnapshotStoreTest {
     @Test
     fun `a changed replay backs the local record up and becomes the snapshot`() {
         val (store, directory) = tickingStore()
-        val live = listOf(UserMessageEntry("a"), AgentMessageEntry("b"), NoticeEntry("Turn finished"))
+        val live = listOf(UserMessageEntry("a"), AgentMessageEntry("b", "m1"), NoticeEntry("Turn finished"))
         store.save("sess_1", live, agentUpdatedAt = 10L, title = "Old")
 
-        val replayed = listOf(UserMessageEntry("a"), AgentMessageEntry("c"), TurnEndEntry)
+        val replayed = listOf(UserMessageEntry("a"), AgentMessageEntry("b", "m2"), TurnEndEntry)
         val replaced = assertNotNull(store.replaceIfChanged("sess_1", replayed, agentUpdatedAt = 20L, title = null))
 
         assertEquals(replayed, replaced.entries)
@@ -223,43 +223,52 @@ class SessionSnapshotStoreTest {
         assertEquals(2, directory.names().size)
     }
 
+    /** A snapshot written before the ids were kept has none: it is backed up and replaced. */
     @Test
-    fun `a replay without messages or without a local snapshot changes nothing`() {
+    fun `a local record without message ids counts as changed`() {
         val (store, directory) = tickingStore()
         store.save("sess_1", listOf(UserMessageEntry("a"), AgentMessageEntry("b")))
 
-        // An agent that reconnects without replaying anything tells nothing about its history.
+        val replayed = listOf(UserMessageEntry("a"), AgentMessageEntry("b", "m1"), TurnEndEntry)
+        assertNotNull(store.replaceIfChanged("sess_1", replayed))
+
+        assertEquals(1, directory.names().count { it.endsWith(".backup") })
+    }
+
+    @Test
+    fun `a replay without message ids or without a local snapshot changes nothing`() {
+        val (store, directory) = tickingStore()
+        store.save("sess_1", listOf(UserMessageEntry("a"), AgentMessageEntry("b")))
+
+        // An agent that replays nothing, or sends no ids, tells nothing about its history.
         assertNull(store.replaceIfChanged("sess_1", listOf(TurnEndEntry)))
-        assertNull(store.replaceIfChanged("sess_missing", listOf(UserMessageEntry("a"))))
+        assertNull(store.replaceIfChanged("sess_1", listOf(UserMessageEntry("a"), AgentMessageEntry("c"))))
+        assertNull(store.replaceIfChanged("sess_missing", listOf(AgentMessageEntry("a", "m1"))))
 
         assertEquals(listOf("sess_1.json"), directory.names())
     }
 
     @Test
-    fun `the comparison ignores what only a live turn records`() {
+    fun `the comparison looks at the message ids only`() {
         val call = ToolCall(toolCallId = "call_1", title = "Edit", status = ToolCallStatus.COMPLETED)
         val live = listOf(
             UserMessageEntry("fix it", listOf(PromptAttachment(path = "/workspace/A.kt"))),
             ThoughtEntry("thinking"),
-            AgentMessageEntry("Looking"),
-            ThoughtEntry("more"),
-            AgentMessageEntry(" at it."),
+            AgentMessageEntry("Looking", "m1"),
             ToolCallEntry(call),
-            PlanSnapshotEntry(listOf(PlanEntry(content = "fix", status = "completed"))),
-            NoticeEntry("Something failed", error = true),
-            NoticeEntry("Cancelled"),
+            AgentMessageEntry(" at it.", "m1"),
+            NoticeEntry("Turn finished"),
             UserMessageEntry("again"),
-            AgentMessageEntry("ok"),
+            AgentMessageEntry("ok", "m2"),
             NoticeEntry("Turn finished"),
         )
+        // Other text, other splits, other boundaries: the same messages all the same.
         val replayed = listOf(
-            UserMessageEntry("fix it"),
-            AgentMessageEntry("Looking at it."),
-            ThoughtEntry("thinking"),
-            ToolCallEntry(call.copy(title = "Edit A.kt", status = ToolCallStatus.FAILED)),
-            TurnEndEntry,
+            UserMessageEntry("fix it!"),
+            AgentMessageEntry("Looking at it", "m1"),
+            ToolCallEntry(call.copy(status = ToolCallStatus.FAILED)),
             UserMessageEntry("again"),
-            AgentMessageEntry("ok"),
+            AgentMessageEntry("okay", "m2"),
             TurnEndEntry,
         )
 
@@ -267,38 +276,15 @@ class SessionSnapshotStoreTest {
     }
 
     @Test
-    fun `the comparison sees every change a replay can make`() {
-        val a = UserMessageEntry("a")
-        val b = AgentMessageEntry("b")
-        val turn = listOf(a, b, TurnEndEntry)
-        assertTrue(SessionSnapshotStore.sameTranscript(turn, turn))
-        // A turn missing, a message changed in the middle, a prompt changed, an answer gone.
-        assertFalse(SessionSnapshotStore.sameTranscript(turn + turn, turn))
-        assertFalse(SessionSnapshotStore.sameTranscript(listOf(a, b, TurnEndEntry, a), listOf(a, AgentMessageEntry("c"), TurnEndEntry, a)))
-        assertFalse(SessionSnapshotStore.sameTranscript(turn, listOf(UserMessageEntry("x"), b, TurnEndEntry)))
-        assertFalse(SessionSnapshotStore.sameTranscript(turn, listOf(a, TurnEndEntry)))
-        // Only prompts and agent messages count: a tool call alone is no change.
-        assertTrue(
-            SessionSnapshotStore.sameTranscript(
-                listOf(a, ToolCallEntry(ToolCall(toolCallId = "call_1")), b),
-                listOf(a, b),
-            ),
-        )
-    }
-
-    /**
-     * A live record ends every turn with a stop-reason notice, while a replay records a single
-     * `turn_end` after all of its turns: the boundaries never line up and are not compared.
-     */
-    @Test
-    fun `the comparison ignores turn boundaries`() {
-        val finished = NoticeEntry("Turn finished")
-        val live = listOf(UserMessageEntry("a"), AgentMessageEntry("b"), finished, UserMessageEntry("c"), AgentMessageEntry("d"), finished)
-        val replayed = listOf(UserMessageEntry("a"), AgentMessageEntry("b"), UserMessageEntry("c"), AgentMessageEntry("d"), TurnEndEntry)
-
-        assertTrue(SessionSnapshotStore.sameTranscript(live, replayed))
-        // The prompts still keep the turns apart: one turn missing is a change.
-        assertFalse(SessionSnapshotStore.sameTranscript(live, replayed.take(2) + TurnEndEntry))
+    fun `the comparison sees messages missing, added, reordered or without an id`() {
+        val m1 = AgentMessageEntry("a", "m1")
+        val m2 = AgentMessageEntry("b", "m2")
+        assertTrue(SessionSnapshotStore.sameTranscript(listOf(m1, m2), listOf(m1, m2)))
+        assertFalse(SessionSnapshotStore.sameTranscript(listOf(m1, m2), listOf(m1)))
+        assertFalse(SessionSnapshotStore.sameTranscript(listOf(m1), listOf(m1, m2)))
+        assertFalse(SessionSnapshotStore.sameTranscript(listOf(m1, m2), listOf(m2, m1)))
+        assertFalse(SessionSnapshotStore.sameTranscript(listOf(AgentMessageEntry("a")), listOf(AgentMessageEntry("a"))))
+        assertFalse(SessionSnapshotStore.sameTranscript(listOf(m1, AgentMessageEntry("b")), listOf(m1, m2)))
     }
 
     @Test
@@ -306,7 +292,7 @@ class SessionSnapshotStoreTest {
         val (store, directory) = tickingStore()
         store.save("sess_1", listOf(UserMessageEntry("a")))
         repeat(25) { store.backup("sess_1") }
-        store.replaceIfChanged("sess_1", listOf(UserMessageEntry("b")))
+        store.replaceIfChanged("sess_1", listOf(AgentMessageEntry("b", "m1")))
 
         assertEquals(26, directory.names().count { it.endsWith(".backup") })
     }

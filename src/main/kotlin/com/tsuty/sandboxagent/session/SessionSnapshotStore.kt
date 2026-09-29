@@ -44,7 +44,15 @@ data class UserMessageEntry(
 
 @Serializable
 @SerialName("agent_message")
-data class AgentMessageEntry(val text: String) : TranscriptEntry
+data class AgentMessageEntry(
+    val text: String,
+    /**
+     * ACP `messageId` of the message; the agent repeats it when it replays the session, which is
+     * what [SessionSnapshotStore.sameTranscript] compares. `null` for an agent that sends none and
+     * for snapshots written before the id was kept.
+     */
+    val messageId: String? = null,
+) : TranscriptEntry
 
 @Serializable
 @SerialName("thought")
@@ -262,14 +270,16 @@ class SessionSnapshotStore(
     /**
      * Settles the history the agent replayed for [sessionId] against the local snapshot.
      *
-     * The two are compared by their prompts and agent messages only ([sameTranscript]). When they
+     * The two are compared by the ids of their agent messages only ([sameTranscript]). When they
      * hold the same conversation the local record wins — it carries what a replay cannot
      * reproduce (stop reasons, error notices, attachment chips, ...) — and nothing is written:
      * `null` is returned. When they differ, the local snapshot is first copied to a backup, then
      * replaced by [replayed], and the new snapshot is returned for the caller to redraw it.
      *
-     * An empty [replayed] tells nothing (an agent may reconnect without replaying anything), and a
-     * failed backup must not cost the local record: both keep the local snapshot as it is.
+     * A [replayed] without any message id tells nothing (an agent may reconnect without replaying
+     * anything, or send no ids at all), and a failed backup must not cost the local record: both
+     * keep the local snapshot as it is. A local snapshot missing ids, on the other hand, counts as
+     * changed: it is backed up and replaced by the replay, which carries them.
      */
     @Synchronized
     fun replaceIfChanged(
@@ -279,7 +289,7 @@ class SessionSnapshotStore(
         title: String? = null,
     ): SessionSnapshot? {
         val local = read(fileOf(sessionId)) ?: return null
-        if (replayableOutline(replayed).isEmpty()) return null
+        if (messageIdOutline(replayed).none { it != null }) return null
         if (sameTranscript(local.entries, replayed)) return null
         backup(sessionId) ?: return null
         val snapshot = SessionSnapshot(
@@ -382,50 +392,35 @@ class SessionSnapshotStore(
         internal fun sanitize(sessionId: String): String = sessionId.replace(ILLEGAL_FILENAME_CHARS, "_")
 
         /**
-         * Same conversation as far as a replay can reproduce it: the [replayableOutline]s of both
-         * transcripts are equal, entry by entry.
+         * Same conversation as far as a replay can tell: both transcripts hold the same agent
+         * messages, by id and in the same order ([messageIdOutline]). A message without an id
+         * cannot be matched, so any `null` makes the transcripts differ.
+         *
+         * Contents are not compared: the ids are stable between a live turn and its replay,
+         * whereas the text, the way it is split into entries, the turn boundaries and everything
+         * around the messages are not. Prompts are left out too: a prompt sent from the IDE has
+         * no id of its own.
          */
-        internal fun sameTranscript(before: List<TranscriptEntry>, after: List<TranscriptEntry>): Boolean =
-            replayableOutline(before) == replayableOutline(after)
-
-        /** One step of a [replayableOutline]. */
-        internal sealed interface OutlineItem {
-            data class User(val text: String) : OutlineItem
-            data class Agent(val text: String) : OutlineItem
+        internal fun sameTranscript(before: List<TranscriptEntry>, after: List<TranscriptEntry>): Boolean {
+            val local = messageIdOutline(before)
+            val replayed = messageIdOutline(after)
+            if (local.any { it == null } || replayed.any { it == null }) return false
+            return local == replayed
         }
 
         /**
-         * The part of a transcript a live turn and its replay both produce: the `user_message`
-         * and `agent_message` entries only, by their text. Prompts are trimmed; agent messages are
-         * compared without whitespace, and consecutive ones are joined, since a thought or a tool
-         * call in between splits them differently live and on replay.
-         *
-         * Everything else is left out. Turn boundaries never line up (a live turn ends with a
-         * [NoticeEntry] carrying the stop reason, a replay records a single [TurnEndEntry] after
-         * all of its turns), but every turn starts with a prompt, which keeps the number and the
-         * order of the turns. Tool calls, thoughts, plans, notices and attachment chips are not
-         * reported the same way by a replay, and they are exactly what the local record adds.
+         * Ids of the `agent_message` entries, in order, one per message: consecutive entries of
+         * the same message (split by a tool call or a thought in between) count once.
          */
-        internal fun replayableOutline(entries: List<TranscriptEntry>): List<OutlineItem> {
-            val outline = mutableListOf<OutlineItem>()
+        internal fun messageIdOutline(entries: List<TranscriptEntry>): List<String?> {
+            val ids = mutableListOf<String?>()
             for (entry in entries) {
-                val item: OutlineItem = when (entry) {
-                    is UserMessageEntry -> OutlineItem.User(entry.text.trim())
-                    is AgentMessageEntry -> {
-                        val text = entry.text.filterNot(Char::isWhitespace)
-                        val last = outline.lastOrNull()
-                        if (last is OutlineItem.Agent) {
-                            outline[outline.lastIndex] = OutlineItem.Agent(last.text + text)
-                            continue
-                        }
-                        OutlineItem.Agent(text)
-                    }
-                    is ToolCallEntry, is NoticeEntry, TurnEndEntry, is ThoughtEntry, is PlanSnapshotEntry -> continue
-                }
-                if (item is OutlineItem.Agent && item.text.isEmpty()) continue
-                outline += item
+                if (entry !is AgentMessageEntry) continue
+                val id = entry.messageId
+                if (id != null && ids.lastOrNull() == id) continue
+                ids += id
             }
-            return outline
+            return ids
         }
 
         /**

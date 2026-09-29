@@ -163,7 +163,7 @@ sealed interface SandboxAgentEvent {
         val contextSize: Long?,
         val cost: UsageCost?,
     ) : SandboxAgentEvent
-    data class AgentMessageChunk(val text: String) : SandboxAgentEvent
+    data class AgentMessageChunk(val text: String, val messageId: String? = null) : SandboxAgentEvent
     data class AgentThoughtChunk(val text: String) : SandboxAgentEvent
     data class ToolCallStarted(val toolCall: ToolCall) : SandboxAgentEvent
     data class ToolCallUpdated(val toolCall: ToolCall) : SandboxAgentEvent
@@ -1403,7 +1403,8 @@ class SandboxAgentService(
         }
         when (val update = notification.update) {
             is SessionInfoUpdate -> handleSessionInfo(updatedSession, update)
-            is AgentMessageChunkUpdate -> publish(SandboxAgentEvent.AgentMessageChunk(update.content.plainText))
+            is AgentMessageChunkUpdate ->
+                publish(SandboxAgentEvent.AgentMessageChunk(update.content.plainText, update.messageId))
             is ThoughtChunkUpdate -> publish(SandboxAgentEvent.AgentThoughtChunk(update.content.plainText))
             is UserMessageChunkUpdate -> publishUserMessageChunk(update.content)
             is ToolCallUpdateEvent -> publish(SandboxAgentEvent.ToolCallStarted(update.toolCall))
@@ -1439,7 +1440,8 @@ class SandboxAgentService(
 
     /** The transcript events a suppressed replay [update] stands for (see [suppressedReplays]). */
     private fun replayedEventsOf(update: SessionUpdate): List<SandboxAgentEvent> = when (update) {
-        is AgentMessageChunkUpdate -> listOf(SandboxAgentEvent.AgentMessageChunk(update.content.plainText))
+        is AgentMessageChunkUpdate ->
+            listOf(SandboxAgentEvent.AgentMessageChunk(update.content.plainText, update.messageId))
         is ThoughtChunkUpdate -> listOf(SandboxAgentEvent.AgentThoughtChunk(update.content.plainText))
         is UserMessageChunkUpdate -> {
             val text = update.content.userPromptText

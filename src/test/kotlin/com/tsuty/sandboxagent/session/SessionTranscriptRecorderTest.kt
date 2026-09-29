@@ -33,6 +33,21 @@ class SessionTranscriptRecorderTest {
     }
 
     @Test
+    fun `the message id is kept, and a new id starts a new message`() {
+        val recorder = SessionTranscriptRecorder()
+
+        recorder.record(SandboxAgentEvent.AgentMessageChunk("Look", "m1"))
+        recorder.record(SandboxAgentEvent.AgentMessageChunk("ing.", "m1"))
+        recorder.record(SandboxAgentEvent.AgentMessageChunk("Done.", "m2"))
+        recorder.record(SandboxAgentEvent.AgentMessageChunk("No id."))
+
+        assertEquals(
+            listOf(AgentMessageEntry("Looking.", "m1"), AgentMessageEntry("Done.No id.", "m2")),
+            recorder.entries(),
+        )
+    }
+
+    @Test
     fun `a replayed history is closed without a stop reason notice, but still gets a turn end marker`() {
         val recorder = SessionTranscriptRecorder()
 

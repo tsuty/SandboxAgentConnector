@@ -866,6 +866,8 @@ data class UserMessageChunkUpdate(
 @SerialName("agent_message_chunk")
 data class AgentMessageChunkUpdate(
     @Serializable(with = ContentBlockSerializer::class) val content: ContentBlock,
+    /** Id of the message the chunk belongs to; optional in ACP, so an agent may leave it out. */
+    val messageId: String? = null,
 ) : SessionUpdate
 
 @Serializable

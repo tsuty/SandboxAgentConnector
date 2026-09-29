@@ -16,6 +16,9 @@ class SessionTranscriptRecorder {
 
     private val entries = mutableListOf<TranscriptEntry>()
     private val agentText = StringBuilder()
+
+    /** ACP `messageId` of the streaming agent message; `null` when the agent sends none. */
+    private var agentMessageId: String? = null
     private val thought = StringBuilder()
 
     /** Index of the [ToolCallEntry] of each tool call, so an update refreshes it in place. */
@@ -37,13 +40,14 @@ class SessionTranscriptRecorder {
     @Synchronized
     fun entries(): List<TranscriptEntry> = buildList {
         addAll(entries)
-        if (agentText.isNotBlank()) add(AgentMessageEntry(agentText.toString()))
+        if (agentText.isNotBlank()) add(AgentMessageEntry(agentText.toString(), agentMessageId))
     }
 
     @Synchronized
     fun clear() {
         entries.clear()
         agentText.setLength(0)
+        agentMessageId = null
         thought.setLength(0)
         toolCallIndexes.clear()
         planIndex = null
@@ -73,7 +77,7 @@ class SessionTranscriptRecorder {
                 pendingAttachments.clear()
             }
             is SandboxAgentEvent.UserPromptAttachments -> attachToPrompt(event.attachments)
-            is SandboxAgentEvent.AgentMessageChunk -> agentText.append(event.text)
+            is SandboxAgentEvent.AgentMessageChunk -> appendAgentChunk(event)
             is SandboxAgentEvent.AgentThoughtChunk -> thought.append(event.text)
             is SandboxAgentEvent.ToolCallStarted -> upsertToolCall(event.toolCall)
             is SandboxAgentEvent.ToolCallUpdated -> upsertToolCall(event.toolCall)
@@ -155,9 +159,20 @@ class SessionTranscriptRecorder {
         }
     }
 
+    /**
+     * Appends a chunk to the streaming agent message; a chunk of another message (another
+     * `messageId`) closes the current one first, so an entry never mixes two messages.
+     */
+    private fun appendAgentChunk(event: SandboxAgentEvent.AgentMessageChunk) {
+        if (event.messageId != null && event.messageId != agentMessageId) endAgentMessage()
+        if (event.messageId != null) agentMessageId = event.messageId
+        agentText.append(event.text)
+    }
+
     /** Closes the streaming agent message so the next chunk starts a new block. */
     private fun endAgentMessage() {
-        if (agentText.isNotBlank()) entries += AgentMessageEntry(agentText.toString())
+        if (agentText.isNotBlank()) entries += AgentMessageEntry(agentText.toString(), agentMessageId)
         agentText.setLength(0)
+        agentMessageId = null
     }
 }
