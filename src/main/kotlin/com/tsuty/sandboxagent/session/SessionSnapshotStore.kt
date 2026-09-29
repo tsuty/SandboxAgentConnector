@@ -235,7 +235,8 @@ class SessionSnapshotStore(
 
     /**
      * Copies the current snapshot of [sessionId] to `{id}.json.{epochMillis}.backup` before a
-     * replay overwrites it; `null` when there is nothing to protect or the copy failed.
+     * replayed history replaces it (see [replaceIfChanged]); `null` when there is nothing to
+     * protect or the copy failed.
      */
     @Synchronized
     fun backup(sessionId: String): File? {
@@ -257,74 +258,89 @@ class SessionSnapshotStore(
     }
 
     /**
-     * Settles [backup] once the replay has overwritten the snapshot of [sessionId].
+     * Settles the history the agent replayed for [sessionId] against the local snapshot.
      *
-     * When the replay holds the same conversation ([sameTranscript]), the local record wins: it
-     * carries what a replay cannot reproduce (stop reasons, error notices, attachment chips, ...),
-     * so [backup] is moved back to `{id}.json` with the agent's new last update time and returned,
-     * for the caller to redraw it. A backup that differs is kept as is and `null` is returned.
+     * The two are compared by their prompts and agent messages only ([sameTranscript]). When they
+     * hold the same conversation the local record wins — it carries what a replay cannot
+     * reproduce (stop reasons, error notices, attachment chips, ...) — and nothing is written:
+     * `null` is returned. When they differ, the local snapshot is first copied to a backup, then
+     * replaced by [replayed], and the new snapshot is returned for the caller to redraw it.
+     *
+     * An empty [replayed] tells nothing (an agent may reconnect without replaying anything), and a
+     * failed backup must not cost the local record: both keep the local snapshot as it is.
      */
     @Synchronized
-    fun restoreBackupIfSame(sessionId: String, backup: File): SessionSnapshot? {
-        val before = read(backup) ?: return null
-        val after = read(fileOf(sessionId)) ?: return null
-        if (!sameTranscript(before.entries, after.entries)) return null
-        val restored = before.copy(
+    fun replaceIfChanged(
+        sessionId: String,
+        replayed: List<TranscriptEntry>,
+        agentUpdatedAt: Long? = null,
+        title: String? = null,
+    ): SessionSnapshot? {
+        val local = read(fileOf(sessionId)) ?: return null
+        if (replayableOutline(replayed).isEmpty()) return null
+        if (sameTranscript(local.entries, replayed)) return null
+        backup(sessionId) ?: return null
+        val snapshot = SessionSnapshot(
             sessionId = sessionId,
             savedAt = clock(),
-            agentUpdatedAt = after.agentUpdatedAt ?: before.agentUpdatedAt,
-            title = after.title ?: before.title,
+            agentUpdatedAt = agentUpdatedAt ?: local.agentUpdatedAt,
+            title = title ?: local.title,
+            entries = replayed,
         )
         return try {
-            write(restored)
-            deleteQuietly(backup)
-            restored
+            write(snapshot)
+            snapshot
         } catch (e: Exception) {
-            log.warn("Failed to put the local snapshot of $sessionId back", e)
+            log.warn("Failed to replace the snapshot of $sessionId with the replayed history", e)
             null
         }
     }
 
-    /** Keeps the [keep] newest backups of [sessionId] and deletes the older ones. */
-    @Synchronized
-    fun pruneBackups(sessionId: String, keep: Int = MAX_BACKUPS) {
-        val backups = LocalSessionIndex.scan(directory).of(sessionId)?.backups ?: return
-        backups.drop(keep.coerceAtLeast(0)).forEach { deleteQuietly(it.file) }
-    }
-
     /**
-     * Deletes a session locally without losing it: the snapshot is renamed to
-     * `{id}.json.{epochMillis}.deleted` first, and its backups are only dropped once that worked,
-     * so a failure never leaves the session without any local copy.
+     * Deletes a session locally without erasing any of its files: the snapshot is renamed to
+     * `{id}.json.{epochMillis}.deleted` (the time of the deletion), and each of its backups to
+     * `{id}.json.{backupEpochMillis}.deleted` (the time of the backup, which dates its content).
+     *
+     * Backups are part of the session: left as `.backup`, a deleted session would keep showing up
+     * in a search that does not include deleted sessions. The snapshot goes first, and a failure
+     * there leaves the backups alone, so the session is never half visible because of this call.
      */
     @Synchronized
     fun moveToDeleted(sessionId: String) {
         val source = fileOf(sessionId)
-        if (!source.isFile) return
-        try {
-            var timestamp = clock()
-            var target = siblingOf(sessionId, timestamp, DELETED_SUFFIX)
-            while (target.exists()) {
-                timestamp += 1
-                target = siblingOf(sessionId, timestamp, DELETED_SUFFIX)
+        if (source.isFile) {
+            try {
+                moveAtomically(source.toPath(), freeDeletedSibling(sessionId, clock()).toPath())
+            } catch (e: Exception) {
+                log.warn("Failed to move the session snapshot of $sessionId aside", e)
+                return
             }
-            moveAtomically(source.toPath(), target.toPath())
-        } catch (e: Exception) {
-            log.warn("Failed to move the session snapshot of $sessionId aside", e)
-            return
         }
-        LocalSessionIndex.scan(directory).of(sessionId)?.backups?.forEach { deleteQuietly(it.file) }
+        LocalSessionIndex.scan(directory).of(sessionId)?.backups?.forEach { backup ->
+            try {
+                val target = freeDeletedSibling(sessionId, backup.timestamp ?: clock())
+                moveAtomically(backup.file.toPath(), target.toPath())
+            } catch (e: Exception) {
+                log.warn("Failed to move the backup ${backup.file.name} aside", e)
+            }
+        }
+    }
+
+    /** `{id}.json.{timestamp}.deleted`, moved on by a millisecond while that name is taken. */
+    private fun freeDeletedSibling(sessionId: String, timestamp: Long): File {
+        var current = timestamp
+        var target = siblingOf(sessionId, current, DELETED_SUFFIX)
+        while (target.exists()) {
+            current += 1
+            target = siblingOf(sessionId, current, DELETED_SUFFIX)
+        }
+        return target
     }
 
     /** Lists the directory once; see [LocalSessionIndex]. */
     @Synchronized
     fun index(): LocalSessionIndex = LocalSessionIndex.scan(directory)
 
-    private fun deleteQuietly(file: File) {
-        if (file.exists() && !file.delete()) {
-            log.warn("Failed to delete ${file.name}")
-        }
-    }
 
     private fun siblingOf(sessionId: String, timestamp: Long, suffix: String): File =
         File(directory, "${sanitize(sessionId)}.json.$timestamp.$suffix")
@@ -344,8 +360,6 @@ class SessionSnapshotStore(
     companion object {
         const val SESSIONS_SUBDIRECTORY: String = "sandbox-agent-sessions"
 
-        /** Backups kept per session; older ones are dropped by [pruneBackups]. */
-        const val MAX_BACKUPS: Int = 20
 
         private const val BACKUP_SUFFIX = "backup"
         private const val DELETED_SUFFIX = "deleted"
@@ -366,22 +380,19 @@ class SessionSnapshotStore(
         internal sealed interface OutlineItem {
             data class User(val text: String) : OutlineItem
             data class Agent(val text: String) : OutlineItem
-            data class Tool(val toolCallId: String) : OutlineItem
         }
 
         /**
-         * The part of a transcript a live turn and its replay both produce.
+         * The part of a transcript a live turn and its replay both produce: the `user_message`
+         * and `agent_message` entries only, by their text. Prompts are trimmed; agent messages are
+         * compared without whitespace, and consecutive ones are joined, since a thought or a tool
+         * call in between splits them differently live and on replay.
          *
-         * - prompts and agent messages by their text (trimmed; consecutive agent messages are
-         *   joined, since a thought in between splits them differently live and on replay);
-         * - tool calls by their id only, their final status and content may differ.
-         *
-         * Turn boundaries are left out: a live turn ends with a [NoticeEntry] carrying the stop
-         * reason, while a replay records a single [TurnEndEntry] after all of its turns, so the
-         * two never line up. Every turn starts with a prompt anyway, which keeps the number and
-         * the order of the turns in the outline. Thoughts, plans, notices and attachment chips are
-         * left out too: a replay never reports them the same way, and they are exactly what the
-         * local record adds.
+         * Everything else is left out. Turn boundaries never line up (a live turn ends with a
+         * [NoticeEntry] carrying the stop reason, a replay records a single [TurnEndEntry] after
+         * all of its turns), but every turn starts with a prompt, which keeps the number and the
+         * order of the turns. Tool calls, thoughts, plans, notices and attachment chips are not
+         * reported the same way by a replay, and they are exactly what the local record adds.
          */
         internal fun replayableOutline(entries: List<TranscriptEntry>): List<OutlineItem> {
             val outline = mutableListOf<OutlineItem>()
@@ -397,8 +408,7 @@ class SessionSnapshotStore(
                         }
                         OutlineItem.Agent(text)
                     }
-                    is ToolCallEntry -> OutlineItem.Tool(entry.toolCall.toolCallId)
-                    is NoticeEntry, TurnEndEntry, is ThoughtEntry, is PlanSnapshotEntry -> continue
+                    is ToolCallEntry, is NoticeEntry, TurnEndEntry, is ThoughtEntry, is PlanSnapshotEntry -> continue
                 }
                 if (item is OutlineItem.Agent && item.text.isEmpty()) continue
                 outline += item

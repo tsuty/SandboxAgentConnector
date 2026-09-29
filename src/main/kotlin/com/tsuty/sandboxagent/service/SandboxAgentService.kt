@@ -45,6 +45,7 @@ import com.tsuty.sandboxagent.acp.SessionNewParams
 import com.tsuty.sandboxagent.acp.SessionNotification
 import com.tsuty.sandboxagent.acp.SessionPromptParams
 import com.tsuty.sandboxagent.acp.SessionResumeParams
+import com.tsuty.sandboxagent.acp.SessionUpdate
 import com.tsuty.sandboxagent.acp.StopReason
 import com.tsuty.sandboxagent.acp.TextContentBlock
 import com.tsuty.sandboxagent.acp.ThoughtChunkUpdate
@@ -65,6 +66,7 @@ import com.tsuty.sandboxagent.session.SessionMetadataStore
 import com.tsuty.sandboxagent.session.SessionSnapshot
 import com.tsuty.sandboxagent.session.SessionSnapshotStore
 import com.tsuty.sandboxagent.session.SessionTranscriptRecorder
+import com.tsuty.sandboxagent.session.TranscriptEntry
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
 import com.tsuty.sandboxagent.vfs.AgentWorkspaceGuard
 import kotlinx.coroutines.CompletableDeferred
@@ -421,10 +423,12 @@ class SandboxAgentService(
 
     /**
      * Sessions whose `session/update` notifications must not reach the UI: a `session/load` is
-     * running in the background only to reconnect the agent context, and its replay would
-     * duplicate the snapshot that is already on screen.
+     * running in the background to reconnect the agent context, and its replay would duplicate
+     * the snapshot that is already on screen. The replay is recorded aside instead, into the
+     * recorder of the session, so it can be compared with the local record once the load is done
+     * (see [SessionSnapshotStore.replaceIfChanged]).
      */
-    private val suppressedReplays = ConcurrentHashMap.newKeySet<String>()
+    private val suppressedReplays = ConcurrentHashMap<String, SessionTranscriptRecorder>()
 
     /** Display state of the current session, written to [snapshotStore] at every turn boundary. */
     private val recorder = SessionTranscriptRecorder()
@@ -883,8 +887,8 @@ class SandboxAgentService(
      *
      * | agent | local snapshot | behaviour |
      * |---|---|---|
-     * | `resume` | present | draw the snapshot, reconnect through `session/resume` |
-     * | `load` only | present | draw the snapshot, reconnect through a *suppressed* `session/load` |
+     * | `load` | present | draw the snapshot, reconnect through a *suppressed* `session/load` whose replay is compared with it |
+     * | `resume` only | present | draw the snapshot, reconnect through `session/resume` |
      * | `load` / `resume` | missing or empty | replay `session/load` live, then save a new snapshot |
      * | none | present | draw the snapshot only (visual restore, no agent context) |
      * | none | missing | reject the selection and keep the current session |
@@ -936,14 +940,16 @@ class SandboxAgentService(
                 publish(SandboxAgentEvent.SessionRestored(sessionId, title, snapshot, contextRestored = false))
                 return
             }
-            // The local record always wins when there is one: the agent's last update time moves
-            // on a mere load / resume, so it cannot tell whether the conversation changed.
+            // The local record is drawn whenever there is one: the agent's last update time moves
+            // on a mere load / resume, so it cannot tell whether the conversation changed. The
+            // entries themselves are compared instead, once the background load has replayed them.
             if (snapshot != null && snapshot.isRestorable) {
                 adoptSession(sessionId, title)
                 recorder.restore(snapshot)
                 // Draw first, reconnect after: the transcript is already known locally.
                 publish(SandboxAgentEvent.SessionRestored(sessionId, title, snapshot, contextRestored = true))
-                reconnectSilently(acpClient, sessionId)
+                val replayed = reconnectSilently(acpClient, sessionId) ?: return
+                adoptReplayIfChanged(sessionId, snapshot, replayed, entry.lastUpdatedMillis, title)
                 return
             }
             // No local history: the replay is the only source, so there is nothing to back up.
@@ -964,27 +970,60 @@ class SandboxAgentService(
     }
 
     /**
-     * Reconnects the agent context of a session whose transcript is already on screen:
-     * `session/resume` does not replay anything, and a `session/load` fallback is muted for the
-     * duration of the call (see [suppressedReplays]).
+     * Reconnects the agent context of a session whose transcript is already on screen, and
+     * returns what the agent replayed on the way, or `null` when there is nothing to compare.
+     *
+     * `session/load` is preferred even when `session/resume` is available: its replay is the only
+     * way to learn whether the agent's history still matches the local record. It is muted for the
+     * duration of the call and recorded aside (see [suppressedReplays]). An agent without
+     * `session/load` reconnects through `session/resume`, which replays nothing.
      */
-    private suspend fun reconnectSilently(acpClient: AcpClient, sessionId: String) {
+    private suspend fun reconnectSilently(acpClient: AcpClient, sessionId: String): List<TranscriptEntry>? {
         val cwd = resolvedCwd()
-        if (agentCapabilities.sessionCapabilities?.resume == true) {
+        if (!agentCapabilities.loadSession) {
             runCatching { acpClient.resumeSession(SessionResumeParams(sessionId = sessionId, cwd = cwd)) }
                 .onSuccess { publishSelectors(it.models, it.modes, it.configOptions) }
                 .onFailure { log.info("session/resume failed for $sessionId", it) }
-            return
+            return null
         }
-        suppressedReplays += sessionId
+        val capture = SessionTranscriptRecorder()
+        suppressedReplays[sessionId] = capture
         try {
             val loaded = acpClient.loadSession(SessionLoadParams(sessionId = sessionId, cwd = cwd))
             publishSelectors(loaded.models, loaded.modes, loaded.configOptions)
         } catch (e: Exception) {
             log.info("session/load failed for $sessionId", e)
+            return null
         } finally {
-            suppressedReplays -= sessionId
+            suppressedReplays.remove(sessionId, capture)
         }
+        capture.record(SandboxAgentEvent.ReplayFinished)
+        return capture.entries()
+    }
+
+    /**
+     * Compares the history the agent [replayed] in the background with the local [snapshot] on
+     * screen. When the conversation changed on the agent side, the local record is backed up and
+     * the replayed history becomes the current snapshot and is redrawn; otherwise the local record
+     * stays as it is (see [SessionSnapshotStore.replaceIfChanged]).
+     *
+     * Nothing is replaced once the tab moved on: another session was entered, or a new turn was
+     * recorded on top of the snapshot in the meantime.
+     */
+    private fun adoptReplayIfChanged(
+        sessionId: String,
+        snapshot: SessionSnapshot,
+        replayed: List<TranscriptEntry>,
+        agentUpdatedAt: Long?,
+        title: String?,
+    ) {
+        if (sessionIdRef.get() != sessionId || recorder.entries() != snapshot.entries) return
+        val replaced = runCatching { snapshotStore.replaceIfChanged(sessionId, replayed, agentUpdatedAt, title) }
+            .onFailure { log.warn("Failed to compare the local record of $sessionId with the agent's", it) }
+            .getOrNull() ?: return
+        log.info("The agent side history of $sessionId changed; the local record was backed up")
+        recorder.restore(replaced)
+        publish(SandboxAgentEvent.SessionRestored(sessionId, title, replaced, contextRestored = true))
     }
 
     /**
@@ -1353,9 +1392,13 @@ class SandboxAgentService(
             return
         }
         val updatedSession = notification.sessionId ?: sessionIdRef.get()
-        if (updatedSession != null && updatedSession in suppressedReplays) {
-            // A background `session/load` is replaying a transcript the UI already shows.
+        val capture = updatedSession?.let { suppressedReplays[it] }
+        if (capture != null) {
+            // A background `session/load` is replaying a transcript the UI already shows: it is
+            // only recorded aside, for the comparison with the local record.
             log.debug("Suppressed a replayed session/update of $updatedSession")
+            runCatching { replayedEventsOf(notification.update).forEach(capture::record) }
+                .onFailure { log.warn("Failed to record the replayed history of $updatedSession", it) }
             return
         }
         when (val update = notification.update) {
@@ -1392,6 +1435,25 @@ class SandboxAgentService(
             }
             else -> log.debug("Ignored session/update variant: $update")
         }
+    }
+
+    /** The transcript events a suppressed replay [update] stands for (see [suppressedReplays]). */
+    private fun replayedEventsOf(update: SessionUpdate): List<SandboxAgentEvent> = when (update) {
+        is AgentMessageChunkUpdate -> listOf(SandboxAgentEvent.AgentMessageChunk(update.content.plainText))
+        is ThoughtChunkUpdate -> listOf(SandboxAgentEvent.AgentThoughtChunk(update.content.plainText))
+        is UserMessageChunkUpdate -> {
+            val text = update.content.userPromptText
+            val attachments = update.content.promptAttachments
+            when {
+                text != null -> listOf(SandboxAgentEvent.UserPrompt(text, attachments))
+                attachments.isNotEmpty() -> listOf(SandboxAgentEvent.UserPromptAttachments(attachments))
+                else -> emptyList()
+            }
+        }
+        is ToolCallUpdateEvent -> listOf(SandboxAgentEvent.ToolCallStarted(update.toolCall))
+        is ToolCallProgressUpdate -> listOf(SandboxAgentEvent.ToolCallUpdated(update.toolCall))
+        is PlanUpdate -> listOf(SandboxAgentEvent.PlanUpdated(update.entries))
+        else -> emptyList()
     }
 
     /**

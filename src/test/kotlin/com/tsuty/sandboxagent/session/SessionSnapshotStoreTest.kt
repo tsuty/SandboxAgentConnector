@@ -194,34 +194,47 @@ class SessionSnapshotStoreTest {
     }
 
     @Test
-    fun `an unchanged replay puts the local record back with the new update time`() {
+    fun `an unchanged replay keeps the local record and makes no backup`() {
         val (store, directory) = tickingStore()
         val live = listOf(UserMessageEntry("a"), AgentMessageEntry("b"), NoticeEntry("Turn finished"))
         store.save("sess_1", live, agentUpdatedAt = 10L, title = "Old")
-        val backup = assertNotNull(store.backup("sess_1"))
-        store.save("sess_1", listOf(UserMessageEntry("a"), AgentMessageEntry("b"), TurnEndEntry), agentUpdatedAt = 20L, title = "New")
+        val before = assertNotNull(store.load("sess_1"))
 
-        val restored = assertNotNull(store.restoreBackupIfSame("sess_1", backup))
+        val replayed = listOf(UserMessageEntry("a"), AgentMessageEntry("b"), TurnEndEntry)
+        assertNull(store.replaceIfChanged("sess_1", replayed, agentUpdatedAt = 20L, title = "New"))
 
-        assertFalse(backup.exists())
         assertEquals(listOf("sess_1.json"), directory.names())
-        assertEquals(live, restored.entries)
-        assertEquals(20L, restored.agentUpdatedAt)
-        assertEquals("New", restored.title)
-        assertEquals(restored, store.load("sess_1"))
+        assertEquals(before, store.load("sess_1"))
     }
 
     @Test
-    fun `a changed replay keeps the backup and the replayed snapshot`() {
-        val (store, _) = tickingStore()
+    fun `a changed replay backs the local record up and becomes the snapshot`() {
+        val (store, directory) = tickingStore()
+        val live = listOf(UserMessageEntry("a"), AgentMessageEntry("b"), NoticeEntry("Turn finished"))
+        store.save("sess_1", live, agentUpdatedAt = 10L, title = "Old")
+
+        val replayed = listOf(UserMessageEntry("a"), AgentMessageEntry("c"), TurnEndEntry)
+        val replaced = assertNotNull(store.replaceIfChanged("sess_1", replayed, agentUpdatedAt = 20L, title = null))
+
+        assertEquals(replayed, replaced.entries)
+        assertEquals(20L, replaced.agentUpdatedAt)
+        assertEquals("Old", replaced.title)
+        assertEquals(replaced, store.load("sess_1"))
+        val backup = assertNotNull(store.index().of("sess_1")).backups.single()
+        assertEquals(live, assertNotNull(store.loadFile(backup.file)).entries)
+        assertEquals(2, directory.names().size)
+    }
+
+    @Test
+    fun `a replay without messages or without a local snapshot changes nothing`() {
+        val (store, directory) = tickingStore()
         store.save("sess_1", listOf(UserMessageEntry("a"), AgentMessageEntry("b")))
-        val backup = assertNotNull(store.backup("sess_1"))
-        store.save("sess_1", listOf(UserMessageEntry("a")))
 
-        assertNull(store.restoreBackupIfSame("sess_1", backup))
+        // An agent that reconnects without replaying anything tells nothing about its history.
+        assertNull(store.replaceIfChanged("sess_1", listOf(TurnEndEntry)))
+        assertNull(store.replaceIfChanged("sess_missing", listOf(UserMessageEntry("a"))))
 
-        assertTrue(backup.exists())
-        assertEquals(listOf(UserMessageEntry("a")), assertNotNull(store.load("sess_1")).entries)
+        assertEquals(listOf("sess_1.json"), directory.names())
     }
 
     @Test
@@ -261,10 +274,13 @@ class SessionSnapshotStoreTest {
         val b = AgentMessageEntry("b")
         val turn = listOf(a, b, TurnEndEntry)
         assertTrue(SessionSnapshotStore.sameTranscript(turn, turn))
-        // A turn missing, a message changed in the middle, a tool call gone.
+        // A turn missing, a message changed in the middle, a prompt changed, an answer gone.
         assertFalse(SessionSnapshotStore.sameTranscript(turn + turn, turn))
         assertFalse(SessionSnapshotStore.sameTranscript(listOf(a, b, TurnEndEntry, a), listOf(a, AgentMessageEntry("c"), TurnEndEntry, a)))
-        assertFalse(
+        assertFalse(SessionSnapshotStore.sameTranscript(turn, listOf(UserMessageEntry("x"), b, TurnEndEntry)))
+        assertFalse(SessionSnapshotStore.sameTranscript(turn, listOf(a, TurnEndEntry)))
+        // Only prompts and agent messages count: a tool call alone is no change.
+        assertTrue(
             SessionSnapshotStore.sameTranscript(
                 listOf(a, ToolCallEntry(ToolCall(toolCallId = "call_1")), b),
                 listOf(a, b),
@@ -288,34 +304,36 @@ class SessionSnapshotStoreTest {
     }
 
     @Test
-    fun `pruning keeps only the newest backups`() {
+    fun `backups are never pruned`() {
         val (store, directory) = tickingStore()
-        store.save("sess_1", listOf(UserMessageEntry("hi")))
-        val backups = (1..SessionSnapshotStore.MAX_BACKUPS + 3).map { assertNotNull(store.backup("sess_1")) }
+        store.save("sess_1", listOf(UserMessageEntry("a")))
+        repeat(25) { store.backup("sess_1") }
+        store.replaceIfChanged("sess_1", listOf(UserMessageEntry("b")))
 
-        store.pruneBackups("sess_1")
-
-        val remaining = directory.names().filter { it.endsWith(".backup") }
-        assertEquals(SessionSnapshotStore.MAX_BACKUPS, remaining.size)
-        backups.take(3).forEach { assertFalse(it.exists()) }
-        backups.drop(3).forEach { assertTrue(it.exists()) }
+        assertEquals(26, directory.names().count { it.endsWith(".backup") })
     }
 
     @Test
-    fun `moving to deleted renames the snapshot and drops its backups`() {
+    fun `moving to deleted renames the snapshot and its backups`() {
         val (store, directory) = tickingStore()
         store.save("sess_1", listOf(UserMessageEntry("hi")))
         store.save("sess_2", listOf(UserMessageEntry("other")))
-        store.backup("sess_1")
+        val backup = assertNotNull(store.backup("sess_1"))
+        val backupTimestamp = assertNotNull(assertNotNull(store.index().of("sess_1")).backups.single().timestamp)
         store.backup("sess_2")
 
         store.moveToDeleted("sess_1")
 
         val names = directory.names()
         assertFalse("sess_1.json" in names)
+        assertFalse(backup.exists())
         assertTrue(names.none { it.startsWith("sess_1.") && it.endsWith(".backup") })
-        val deleted = names.single { it.startsWith("sess_1.json.") && it.endsWith(".deleted") }
-        assertNotNull(store.loadFile(File(directory, deleted)))
+        val files = assertNotNull(store.index().of("sess_1"))
+        assertNull(files.current)
+        assertEquals(2, files.deleted.size)
+        // The former backup keeps the time it was taken at.
+        assertTrue(files.deleted.any { it.timestamp == backupTimestamp })
+        files.deleted.forEach { assertNotNull(store.loadFile(it.file)) }
         assertNull(store.load("sess_1"))
         // Other sessions are untouched.
         assertTrue("sess_2.json" in names)
@@ -323,14 +341,23 @@ class SessionSnapshotStoreTest {
     }
 
     @Test
-    fun `moving a session without a snapshot to deleted does nothing`() {
+    fun `moving a session without a snapshot to deleted still moves its backups`() {
         val (store, directory) = tempStore()
         directory.mkdirs()
         File(directory, "sess_1.json.5.backup").writeText("{}")
 
         store.moveToDeleted("sess_1")
 
-        assertEquals(listOf("sess_1.json.5.backup"), directory.names())
+        assertEquals(listOf("sess_1.json.5.deleted"), directory.names())
+    }
+
+    @Test
+    fun `moving to deleted does nothing without any file`() {
+        val (store, directory) = tempStore()
+
+        store.moveToDeleted("sess_1")
+
+        assertTrue(directory.names().isEmpty())
     }
 
     @Test

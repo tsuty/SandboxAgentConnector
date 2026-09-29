@@ -178,7 +178,18 @@ class SessionRowActionsStep(
 class BackupsStep(
     backups: List<LocalSessionFile>,
     private val onOpen: (LocalSessionFile) -> Unit,
-) : BaseListPopupStep<LocalSessionFile>(null, backups.sortedByDescending { it.timestamp ?: 0 }) {
+) : BaseListPopupStep<LocalSessionFile>(
+    null,
+    backups.sortedByDescending { it.timestamp ?: 0 }.take(MAX_LISTED_BACKUPS),
+) {
+
+    companion object {
+        /**
+         * Backups listed at most, the newest ones. Only the list is capped: no backup file is ever
+         * deleted, and the older ones stay reachable through the local session search.
+         */
+        const val MAX_LISTED_BACKUPS: Int = 20
+    }
 
     override fun getTextFor(value: LocalSessionFile): String = LocalSessionPresentation.backupRow(value)
 

@@ -39,8 +39,9 @@
             snapshotted locally and restored via <code>session/load</code> / <code>session/resume</code>.
             Each row of the list tells at a glance whether the session is stored locally and has backups.</li>
         <li><b>Local session protection</b> &ndash; the local transcript is never lost to the agent: a session with
-            local history is always restored from it, never overwritten by a replay of the agent history, and
-            deleting a session moves its transcript aside instead of erasing it. Backups and deleted sessions
+            local history is drawn from it, and when the history the agent replays differs in its prompts or
+            agent messages, the local transcript is kept as a backup before the agent's version replaces it;
+            deleting a session moves its transcript and its backups aside instead of erasing them. Backups and deleted sessions
             open in a <b>Read Only tab</b> that never connects to the sandbox.</li>
         <li><b>Local session search</b> &ndash; <code>Search Local Sessions</code> in the tool window options menu
             searches the full text of every locally stored session, its backups and, on request, deleted ones.
@@ -86,8 +87,9 @@
         <li>Context chips for the active file, the selection and manually attached files, with auto-attach off by default.</li>
         <li>Optional read-only workspace lock during a turn and automatic VFS refresh of sandbox-side changes.</li>
         <li><code>Open Sandbox Terminal</code>: a login shell in the same sandbox, opened in a terminal tab of the IDE.</li>
-        <li>Local session protection: a session with local history is always restored from it instead of being
-            replayed over, and deletion moves the transcript aside.</li>
+        <li>Local session protection: a session with local history is drawn from it; a changed agent side history
+            (prompts / agent messages) backs the local transcript up before replacing it, and deletion moves the
+            transcript and its backups aside. No local file is ever erased.</li>
         <li>Session list with storage-state icons (local / local with backups / agent only), a full-title tooltip
             and a hover submenu with <code>Rename</code> / <code>Delete</code> / <code>Backups</code>.</li>
         <li>Read Only tabs for backups and deleted sessions: no connection, no prompt, transcript search included.</li>

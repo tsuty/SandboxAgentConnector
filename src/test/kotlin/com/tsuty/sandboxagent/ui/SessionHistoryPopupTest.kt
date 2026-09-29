@@ -147,6 +147,15 @@ class SessionHistoryPopupTest {
     }
 
     @Test
+    fun `only the newest backups are listed`() {
+        val backups = (1L..25L).map { file("sess_1", LocalSessionKind.BACKUP, it * 1_000L) }
+        val step = BackupsStep(backups) {}
+
+        assertEquals(BackupsStep.MAX_LISTED_BACKUPS, step.values.size)
+        assertEquals(backups.reversed().take(BackupsStep.MAX_LISTED_BACKUPS), step.values)
+    }
+
+    @Test
     fun `the read only status names the kind and the date of the file`() {
         val backup = file("sess_1", LocalSessionKind.BACKUP, 2_000L)
         val deleted = file("sess_1", LocalSessionKind.DELETED, 2_000L)
