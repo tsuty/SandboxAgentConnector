@@ -43,13 +43,11 @@ class SessionSnapshotStoreTest {
             NoticeEntry("Turn finished"),
         )
 
-        store.save("sess_1", entries, agentUpdatedAt = 4_000L, title = "Fix the parser")
+        store.save("sess_1", entries, title = "Fix the parser")
 
         val snapshot = assertNotNull(store.load("sess_1"))
         assertEquals(SESSION_SNAPSHOT_SCHEMA_VERSION, snapshot.schemaVersion)
         assertEquals("sess_1", snapshot.sessionId)
-        assertEquals(5_000L, snapshot.savedAt)
-        assertEquals(4_000L, snapshot.agentUpdatedAt)
         assertEquals("Fix the parser", snapshot.title)
         assertEquals(entries.size, snapshot.entries.size)
         assertEquals("fix the parser", assertIs<UserMessageEntry>(snapshot.entries[0]).text)
@@ -105,13 +103,12 @@ class SessionSnapshotStoreTest {
     }
 
     @Test
-    fun `a snapshot with entries is always restored, whatever the update times`() {
+    fun `a snapshot with entries is always restored`() {
         val entries = listOf(UserMessageEntry("hi"))
 
-        assertTrue(SessionSnapshot(sessionId = "sess_1", savedAt = 10, agentUpdatedAt = 100, entries = entries).isRestorable)
         assertTrue(SessionSnapshot(sessionId = "sess_1", entries = entries).isRestorable)
         // An empty snapshot is never worth showing.
-        assertFalse(SessionSnapshot(sessionId = "sess_1", agentUpdatedAt = 100).isRestorable)
+        assertFalse(SessionSnapshot(sessionId = "sess_1").isRestorable)
     }
 
     /**
@@ -177,29 +174,32 @@ class SessionSnapshotStoreTest {
 
     private fun File.names(): List<String> = listFiles().orEmpty().map { it.name }.sorted()
 
+    /** Backs the current snapshot of [sessionId] up by replacing it with a replay of a new message. */
+    private fun SessionSnapshotStore.backUpByReplay(sessionId: String, messageId: String) {
+        assertNotNull(replaceIfChanged(sessionId, listOf(AgentMessageEntry("replayed", messageId))))
+    }
+
     @Test
-    fun `backup copies the current snapshot next to it and is loadable`() {
+    fun `the backup is a loadable copy of the snapshot next to it`() {
         val (store, directory) = tempStore(now = 7_000L)
         store.save("sess_1", listOf(UserMessageEntry("hi")))
 
-        val backup = assertNotNull(store.backup("sess_1"))
+        store.backUpByReplay("sess_1", "m1")
 
-        assertEquals("sess_1.json.7000.backup", backup.name)
         assertEquals(listOf("sess_1.json", "sess_1.json.7000.backup"), directory.names())
+        val backup = File(directory, "sess_1.json.7000.backup")
         assertEquals("hi", assertIs<UserMessageEntry>(assertNotNull(store.loadFile(backup)).entries.single()).text)
-        // Nothing to protect without a snapshot.
-        assertNull(store.backup("sess_missing"))
     }
 
     @Test
     fun `an unchanged replay keeps the local record and makes no backup`() {
         val (store, directory) = tickingStore()
         val live = listOf(UserMessageEntry("a"), AgentMessageEntry("b", "m1"), NoticeEntry("Turn finished"))
-        store.save("sess_1", live, agentUpdatedAt = 10L, title = "Old")
+        store.save("sess_1", live, title = "Old")
         val before = assertNotNull(store.load("sess_1"))
 
         val replayed = listOf(UserMessageEntry("a"), AgentMessageEntry("b", "m1"), TurnEndEntry)
-        assertNull(store.replaceIfChanged("sess_1", replayed, agentUpdatedAt = 20L, title = "New"))
+        assertNull(store.replaceIfChanged("sess_1", replayed, title = "New"))
 
         assertEquals(listOf("sess_1.json"), directory.names())
         assertEquals(before, store.load("sess_1"))
@@ -209,13 +209,12 @@ class SessionSnapshotStoreTest {
     fun `a changed replay backs the local record up and becomes the snapshot`() {
         val (store, directory) = tickingStore()
         val live = listOf(UserMessageEntry("a"), AgentMessageEntry("b", "m1"), NoticeEntry("Turn finished"))
-        store.save("sess_1", live, agentUpdatedAt = 10L, title = "Old")
+        store.save("sess_1", live, title = "Old")
 
         val replayed = listOf(UserMessageEntry("a"), AgentMessageEntry("b", "m2"), TurnEndEntry)
-        val replaced = assertNotNull(store.replaceIfChanged("sess_1", replayed, agentUpdatedAt = 20L, title = null))
+        val replaced = assertNotNull(store.replaceIfChanged("sess_1", replayed, title = null))
 
         assertEquals(replayed, replaced.entries)
-        assertEquals(20L, replaced.agentUpdatedAt)
         assertEquals("Old", replaced.title)
         assertEquals(replaced, store.load("sess_1"))
         val backup = assertNotNull(store.index().of("sess_1")).backups.single()
@@ -291,8 +290,7 @@ class SessionSnapshotStoreTest {
     fun `backups are never pruned`() {
         val (store, directory) = tickingStore()
         store.save("sess_1", listOf(UserMessageEntry("a")))
-        repeat(25) { store.backup("sess_1") }
-        store.replaceIfChanged("sess_1", listOf(AgentMessageEntry("b", "m1")))
+        repeat(26) { store.backUpByReplay("sess_1", "m$it") }
 
         assertEquals(26, directory.names().count { it.endsWith(".backup") })
     }
@@ -302,9 +300,11 @@ class SessionSnapshotStoreTest {
         val (store, directory) = tickingStore()
         store.save("sess_1", listOf(UserMessageEntry("hi")))
         store.save("sess_2", listOf(UserMessageEntry("other")))
-        val backup = assertNotNull(store.backup("sess_1"))
-        val backupTimestamp = assertNotNull(assertNotNull(store.index().of("sess_1")).backups.single().timestamp)
-        store.backup("sess_2")
+        store.backUpByReplay("sess_1", "m1")
+        val backupFile = assertNotNull(store.index().of("sess_1")).backups.single()
+        val backup = backupFile.file
+        val backupTimestamp = assertNotNull(backupFile.timestamp)
+        store.backUpByReplay("sess_2", "m1")
 
         store.moveToDeleted("sess_1")
 

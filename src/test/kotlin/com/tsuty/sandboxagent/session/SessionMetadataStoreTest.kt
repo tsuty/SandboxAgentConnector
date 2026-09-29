@@ -6,7 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** Rename / touch / delete behaviour and XML persistence of the IDE side session information. */
+/** Rename / delete behaviour and XML persistence of the IDE side session information. */
 class SessionMetadataStoreTest {
 
     @Test
@@ -18,18 +18,6 @@ class SessionMetadataStoreTest {
 
         store.rename("sess_1", "   ")
         assertNull(store.renameOverride("sess_1"))
-        // The entry itself survives, so a later `touch` does not lose the rename history.
-        assertEquals(listOf("sess_1"), store.all().map { it.sessionId })
-    }
-
-    @Test
-    fun `touch remembers when a session was last opened`() {
-        val store = SessionMetadataStore()
-
-        store.touch("sess_1", now = 1_000L)
-        store.touch("sess_1", now = 2_000L)
-
-        assertEquals(2_000L, store.find("sess_1")?.lastOpenedAt)
     }
 
     @Test
@@ -50,21 +38,20 @@ class SessionMetadataStoreTest {
 
         assertNull(store.find("sess_unknown"))
         assertNull(store.renameOverride("sess_unknown"))
-        assertTrue(store.all().isEmpty())
     }
 
     @Test
     fun `state survives a serialization round trip`() {
         val original = SessionMetadataStore()
         original.rename("sess_1", "Fix the parser")
-        original.touch("sess_1", now = 1_700_000_000_000L)
+        original.tryLock("sess_1", "owner-a", ttlMillis = 30_000, now = 1_700_000_000_000L)
 
         val element = XmlSerializer.serialize(original.getState())
         val restored = SessionMetadataStore()
         restored.loadState(XmlSerializer.deserialize(element, SessionMetadataStore.State::class.java))
 
         assertEquals("Fix the parser", restored.renameOverride("sess_1"))
-        assertEquals(1_700_000_000_000L, restored.find("sess_1")?.lastOpenedAt)
+        assertEquals(1_700_000_000_000L, restored.find("sess_1")?.lockedAtMillis)
     }
 
     @Test

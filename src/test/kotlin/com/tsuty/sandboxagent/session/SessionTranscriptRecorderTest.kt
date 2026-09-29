@@ -191,7 +191,6 @@ class SessionTranscriptRecorderTest {
 
         recorder.clear()
 
-        assertTrue(recorder.isEmpty)
         assertTrue(recorder.entries().isEmpty())
     }
 }

@@ -84,17 +84,13 @@ data object TurnEndEntry : TranscriptEntry
 /**
  * Locally stored display state of one session.
  *
- * [savedAt] is when the IDE wrote the file, [agentUpdatedAt] is the last update the agent reported
- * for the session at that moment. Neither decides whether the snapshot is shown (see
- * [isRestorable]): the agent moves its update time on a mere `session/load` / `session/resume`,
- * so comparing it would replay sessions that did not change at all.
+ * No update time is kept: the agent moves its update time on a mere `session/load` /
+ * `session/resume`, so it cannot decide whether the snapshot is shown (see [isRestorable]).
  */
 @Serializable
 data class SessionSnapshot(
     val schemaVersion: Int = SESSION_SNAPSHOT_SCHEMA_VERSION,
     val sessionId: String,
-    val savedAt: Long = 0,
-    val agentUpdatedAt: Long? = null,
     val title: String? = null,
     val entries: List<TranscriptEntry> = emptyList(),
 ) {
@@ -159,13 +155,10 @@ class SessionSnapshotStore(
     fun save(
         sessionId: String,
         entries: List<TranscriptEntry>,
-        agentUpdatedAt: Long? = null,
         title: String? = null,
     ) {
         val snapshot = SessionSnapshot(
             sessionId = sessionId,
-            savedAt = clock(),
-            agentUpdatedAt = agentUpdatedAt,
             title = title,
             entries = entries,
         )
@@ -248,8 +241,7 @@ class SessionSnapshotStore(
      * replayed history replaces it (see [replaceIfChanged]); `null` when there is nothing to
      * protect or the copy failed.
      */
-    @Synchronized
-    fun backup(sessionId: String): File? {
+    private fun backup(sessionId: String): File? {
         val source = fileOf(sessionId)
         if (!source.isFile) return null
         return try {
@@ -285,7 +277,6 @@ class SessionSnapshotStore(
     fun replaceIfChanged(
         sessionId: String,
         replayed: List<TranscriptEntry>,
-        agentUpdatedAt: Long? = null,
         title: String? = null,
     ): SessionSnapshot? {
         val local = read(fileOf(sessionId)) ?: return null
@@ -294,8 +285,6 @@ class SessionSnapshotStore(
         backup(sessionId) ?: return null
         val snapshot = SessionSnapshot(
             sessionId = sessionId,
-            savedAt = clock(),
-            agentUpdatedAt = agentUpdatedAt ?: local.agentUpdatedAt,
             title = title ?: local.title,
             entries = replayed,
         )

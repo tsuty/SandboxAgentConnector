@@ -9,15 +9,12 @@ import com.intellij.util.xmlb.annotations.XCollection
 
 /**
  * IDE side information about one agent session. It is deliberately *not* part of
- * [SessionSnapshot]: a rename or a last opened time must survive a purged, corrupt or
- * unmigratable snapshot.
+ * [SessionSnapshot]: a rename must survive a purged, corrupt or unmigratable snapshot.
  */
 class SessionMetadata(
     var sessionId: String = "",
     /** Title the user typed in `Rename`; wins over the title the agent reports. */
     var renameOverride: String? = null,
-    /** Epoch milliseconds of the last time the session was selected in the IDE. */
-    var lastOpenedAt: Long = 0,
     /**
      * Id of the IDE process/window that currently holds the duplicate-open lock of this session
      * (Ph2 §3.3, 2nd tier); `null` when the session is not locked.
@@ -34,8 +31,8 @@ class SessionMetadata(
  * application wide, and it is kept separate from the transcript snapshots on purpose: the two have
  * different lifecycles.
  *
- * It lives in `workspace.xml` rather than in a shared `.idea` file: renames and last opened times
- * are machine local and must not be committed together with the project settings.
+ * It lives in `workspace.xml` rather than in a shared `.idea` file: renames and locks are machine
+ * local and must not be committed together with the project settings.
  */
 @State(name = "SandboxAgentSessionMetadata", storages = [Storage(StoragePathMacros.WORKSPACE_FILE)])
 class SessionMetadataStore : PersistentStateComponent<SessionMetadataStore.State> {
@@ -54,9 +51,6 @@ class SessionMetadataStore : PersistentStateComponent<SessionMetadataStore.State
     }
 
     @Synchronized
-    fun all(): List<SessionMetadata> = state.sessions.toList()
-
-    @Synchronized
     fun find(sessionId: String): SessionMetadata? = state.sessions.firstOrNull { it.sessionId == sessionId }
 
     /** Local title override of [sessionId]; blank input clears the override. */
@@ -68,12 +62,6 @@ class SessionMetadataStore : PersistentStateComponent<SessionMetadataStore.State
 
     @Synchronized
     fun renameOverride(sessionId: String): String? = find(sessionId)?.renameOverride
-
-    /** Remembers that the session was just selected, which orders the history dropdown. */
-    @Synchronized
-    fun touch(sessionId: String, now: Long = System.currentTimeMillis()) {
-        mutate(sessionId) { it.lastOpenedAt = now }
-    }
 
     @Synchronized
     fun delete(sessionId: String) {

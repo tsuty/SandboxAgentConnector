@@ -33,9 +33,6 @@ class SessionTranscriptRecorder {
      */
     private val pendingAttachments = mutableListOf<PromptAttachment>()
 
-    val isEmpty: Boolean
-        get() = entries.isEmpty() && agentText.isEmpty() && thought.isEmpty()
-
     /** Display state recorded so far, including the message that is still streaming. */
     @Synchronized
     fun entries(): List<TranscriptEntry> = buildList {

@@ -723,7 +723,6 @@ class SandboxAgentService(
             pristineSessionRef.set(sessionId)
         } else {
             pristineSessionRef.set(null)
-            metadataStore()?.touch(sessionId)
         }
         trafficLogger?.onSessionEstablished(sessionId)
     }
@@ -797,9 +796,7 @@ class SandboxAgentService(
      * belongs to the history and is never deleted behind the user's back.
      */
     private fun markSessionUsed(sessionId: String) {
-        if (pristineSessionRef.compareAndSet(sessionId, null)) {
-            metadataStore()?.touch(sessionId)
-        }
+        pristineSessionRef.compareAndSet(sessionId, null)
     }
 
     /**
@@ -949,7 +946,7 @@ class SandboxAgentService(
                 // Draw first, reconnect after: the transcript is already known locally.
                 publish(SandboxAgentEvent.SessionRestored(sessionId, title, snapshot, contextRestored = true))
                 val replayed = reconnectSilently(acpClient, sessionId) ?: return
-                adoptReplayIfChanged(sessionId, snapshot, replayed, entry.lastUpdatedMillis, title)
+                adoptReplayIfChanged(sessionId, snapshot, replayed, title)
                 return
             }
             // No local history: the replay is the only source, so there is nothing to back up.
@@ -1014,11 +1011,10 @@ class SandboxAgentService(
         sessionId: String,
         snapshot: SessionSnapshot,
         replayed: List<TranscriptEntry>,
-        agentUpdatedAt: Long?,
         title: String?,
     ) {
         if (sessionIdRef.get() != sessionId || recorder.entries() != snapshot.entries) return
-        val replaced = runCatching { snapshotStore.replaceIfChanged(sessionId, replayed, agentUpdatedAt, title) }
+        val replaced = runCatching { snapshotStore.replaceIfChanged(sessionId, replayed, title) }
             .onFailure { log.warn("Failed to compare the local record of $sessionId with the agent's", it) }
             .getOrNull() ?: return
         log.info("The agent side history of $sessionId changed; the local record was backed up")
@@ -1053,25 +1049,20 @@ class SandboxAgentService(
             // The replay never reports a turn boundary: close the thought strip here instead.
             publish(SandboxAgentEvent.ReplayFinished)
         }
-        saveSnapshot(sessionId, entry.lastUpdatedMillis, title)
+        saveSnapshot(sessionId, title)
     }
 
     private fun titleOf(entry: SessionListEntry, snapshot: SessionSnapshot?): String? =
         metadataStore()?.renameOverride(entry.sessionId) ?: entry.title ?: snapshot?.title
 
-    /**
-     * Persists the transcript of [sessionId]. [agentUpdatedAt] is the last update time the agent
-     * reports for the session, kept for information only (a restore never compares it); when the
-     * agent tracks none, the local time is stored instead.
-     */
-    private fun saveSnapshot(sessionId: String, agentUpdatedAt: Long?, title: String? = sessionTitleRef.get()) {
+    /** Persists the transcript of [sessionId]. */
+    private fun saveSnapshot(sessionId: String, title: String? = sessionTitleRef.get()) {
         val entries = recorder.entries()
         if (entries.isEmpty()) return
         runCatching {
             snapshotStore.save(
                 sessionId = sessionId,
                 entries = entries,
-                agentUpdatedAt = agentUpdatedAt ?: System.currentTimeMillis(),
                 title = title,
             )
         }.onFailure { log.warn("Failed to save the snapshot of $sessionId", it) }
@@ -1182,15 +1173,11 @@ class SandboxAgentService(
 
     /**
      * Stores the transcript once the turn ended. `session/list` is re-read to keep the session
-     * list current; the agent side update time it reports is stored for information only.
+     * list current.
      */
     private suspend fun saveSnapshotAfterTurn(sessionId: String) {
-        val agentUpdatedAt = if (canListSessions) {
-            refreshSessionsSuspending().firstOrNull { it.sessionId == sessionId }?.lastUpdatedMillis
-        } else {
-            null
-        }
-        saveSnapshot(sessionId, agentUpdatedAt)
+        if (canListSessions) refreshSessionsSuspending()
+        saveSnapshot(sessionId)
     }
 
     /** Text first, then every attached file / selection as an embedded resource block. */
