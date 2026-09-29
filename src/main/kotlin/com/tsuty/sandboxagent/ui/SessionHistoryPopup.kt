@@ -253,7 +253,7 @@ object SessionHistoryPopup {
             currentSessionId = service.sessionId,
             rowActions = { entry ->
                 SessionRowActionsStep(
-                    backups = index.of(entry.sessionId)?.backups.orEmpty(),
+                    backups = index.listedBackups(entry.sessionId),
                     onAction = { action ->
                         when (action) {
                             SessionRowAction.RENAME -> SessionActions.rename(project, service, entry)

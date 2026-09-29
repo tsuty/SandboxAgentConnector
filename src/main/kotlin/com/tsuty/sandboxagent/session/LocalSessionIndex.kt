@@ -41,6 +41,12 @@ class LocalSessionIndex(val bySanitizedId: Map<String, LocalSessionFiles>) {
 
     fun of(sessionId: String): LocalSessionFiles? = bySanitizedId[SessionSnapshotStore.sanitize(sessionId)]
 
+    /**
+     * A session without its current snapshot counts as not kept locally, whatever else is left of
+     * it: a `.backup` without `{id}.json` shows as [StorageState.REMOTE_ONLY] and offers no
+     * backups in the session list ([listedBackups]). Those files stay reachable through the local
+     * session search.
+     */
     fun storageState(sessionId: String): StorageState {
         val files = of(sessionId) ?: return StorageState.REMOTE_ONLY
         return when {
@@ -48,6 +54,15 @@ class LocalSessionIndex(val bySanitizedId: Map<String, LocalSessionFiles>) {
             files.backups.isNotEmpty() -> StorageState.LOCAL_WITH_BACKUP
             else -> StorageState.LOCAL
         }
+    }
+
+    /**
+     * Backups the session list offers for [sessionId], newest first: none unless the current
+     * snapshot exists, in line with [storageState].
+     */
+    fun listedBackups(sessionId: String): List<LocalSessionFile> {
+        val files = of(sessionId) ?: return emptyList()
+        return if (files.current == null) emptyList() else files.backups
     }
 
     /** The files the local session search reads: current snapshots and backups, deleted ones on request. */

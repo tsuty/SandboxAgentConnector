@@ -66,6 +66,19 @@ class LocalSessionIndexTest {
     }
 
     @Test
+    fun `backups are listed only while the current snapshot exists`() {
+        val index = LocalSessionIndex.scan(
+            directoryWith("b.json", "b.json.1.backup", "b.json.2.backup", "d.json.1.backup"),
+        )
+
+        assertEquals(listOf(2L, 1L), index.listedBackups("b").map { it.timestamp })
+        assertEquals(emptyList(), index.listedBackups("d"))
+        assertEquals(emptyList(), index.listedBackups("missing"))
+        // The backups of `d` stay searchable.
+        assertEquals(3, index.searchable(includeDeleted = false).count { it.kind == LocalSessionKind.BACKUP })
+    }
+
+    @Test
     fun `the lookup sanitizes the session id like the store does`() {
         val index = LocalSessionIndex.scan(directoryWith("sess_weird_id.json"))
 
