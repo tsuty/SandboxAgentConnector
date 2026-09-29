@@ -91,6 +91,7 @@ class AgentSelector : JPanel(VerticalLayout(VERTICAL_GAP)) {
             override fun textChanged(e: DocumentEvent) {
                 if (updating) return
                 current = current.copy(customCommand = text)
+                onValidationChanged?.invoke()
             }
         })
     }
@@ -126,6 +127,12 @@ class AgentSelector : JPanel(VerticalLayout(VERTICAL_GAP)) {
      * agent (its color, see `AgentColors`) can follow the drop down before anything is applied.
      */
     var onAgentChanged: ((AcpAgent) -> Unit)? = null
+
+    /**
+     * Told whenever the selected agent or the custom command changes, so that UI DSL validation
+     * installed on this component can re-evaluate.
+     */
+    var onValidationChanged: (() -> Unit)? = null
 
     /**
      * The reason the selected agent cannot be started, or `null` when it can be. Only a `binary`
@@ -211,6 +218,7 @@ class AgentSelector : JPanel(VerticalLayout(VERTICAL_GAP)) {
         }
         revalidate()
         onAgentChanged?.invoke(current)
+        onValidationChanged?.invoke()
     }
 
     /** An agent picked before the registry was reachable has no version to show. */

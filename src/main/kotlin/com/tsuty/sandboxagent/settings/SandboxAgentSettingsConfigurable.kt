@@ -99,6 +99,7 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
                 // Not filled: the version and the update offer sit next to the drop down and are
                 // laid out from the left edge of the cell (see `AgentSelector`).
                 cell(agentSelector)
+                    .validationRequestor { agentSelector.onValidationChanged = it }
                     .onReset {
                         agentSelector.setState(settings.agent())
                         agentSelector.setAgents(AcpAgentRegistry.fallbackAgents())
