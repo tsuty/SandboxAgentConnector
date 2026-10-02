@@ -43,8 +43,19 @@ class ThinkingStatusPanel : BackgroundPanel(BorderLayout(0, JBUI.scale(2))) {
         preferredSize = Dimension(0, area.getFontMetrics(area.font).height * VISIBLE_LINES)
     }
 
+    /**
+     * Trailing whitespace of the stream that is not on screen yet. Every thought block ends with a
+     * paragraph break, which would otherwise take two of the [VISIBLE_LINES] and leave only the
+     * last wrapped fragment of the sentence in view; it is written once the next text follows.
+     */
+    private val pendingWhitespace = StringBuilder()
+
     /** Everything the agent has been thinking during the running turn. */
     val thought: String
+        get() = area.text + pendingWhitespace
+
+    /** The text shown in the strip. */
+    internal val displayedText: String
         get() = area.text
 
     init {
@@ -56,8 +67,11 @@ class ThinkingStatusPanel : BackgroundPanel(BorderLayout(0, JBUI.scale(2))) {
 
     /** Appends a streamed chunk and keeps the tail of the thought in view. */
     fun append(text: String) {
-        if (text.isEmpty()) return
-        area.append(text)
+        pendingWhitespace.append(text)
+        val shown = pendingWhitespace.trimEnd()
+        if (shown.isEmpty()) return
+        area.append(shown.toString())
+        pendingWhitespace.delete(0, shown.length)
         isVisible = true
         revalidate()
         repaint()
@@ -67,6 +81,7 @@ class ThinkingStatusPanel : BackgroundPanel(BorderLayout(0, JBUI.scale(2))) {
     /** Drops the collected thought and hides the strip again. */
     fun clear() {
         area.text = ""
+        pendingWhitespace.setLength(0)
         isVisible = false
         revalidate()
         repaint()

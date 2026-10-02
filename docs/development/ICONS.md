@@ -62,6 +62,28 @@ The file name is the whole mapping table: it is the icon name the document asks 
 kind nobody drew falls back to `other.svg`, and `TranscriptIconsTest` fails when a `ToolKind` has no
 file, so the fallback stays a safety net instead of a silent hole.
 
+The tool call kinds, spelled out (`ToolKind` in `AcpModels.kt`, label from
+`ToolCallPresentation.kindLabel`):
+
+| `kind` | File | Symbol | Drawing | Label |
+| --- | --- | --- | --- | --- |
+| `read` | `read.svg` | `ra-icon-read` | eye | `Read file` |
+| `edit` | `edit.svg` | `ra-icon-edit` | pencil over a page | `Edit file` |
+| `delete` | `delete.svg` | `ra-icon-delete` | trash can | `Delete file` |
+| `move` | `move.svg` | `ra-icon-move` | arrow into a page | `Move file` |
+| `search` | `search.svg` | `ra-icon-search` | magnifying glass | `Search` |
+| `execute` | `execute.svg` | `ra-icon-execute` | terminal prompt (`>_`) | `Execute command` |
+| `think` | `think.svg` | `ra-icon-think` | light bulb | `Think` |
+| `fetch` | `fetch.svg` | `ra-icon-fetch` | globe | `Fetch` |
+| `switch_mode` | `switch_mode.svg` | `ra-icon-switch_mode` | toggle switch | `Switch mode` |
+| `other` | `other.svg` | `ra-icon-other` | info mark in a circle | `Tool call` |
+| missing (`null`) | `other.svg` | `ra-icon-other` | info mark in a circle | `Tool call` |
+| unknown string | `other.svg` | `ra-icon-other` | info mark in a circle | the kind verbatim |
+
+A missing kind is turned into `other` by `TranscriptToolCall`. An unknown one reaches the
+document as it is, and `icon()` in `transcript.js` falls back to `ra-icon-other` because no such
+symbol exists.
+
 ### 3.2 What the drawing has to look like
 
 Two rules, and they are the only two:
