@@ -396,18 +396,32 @@ class SandboxAgentMainPanel(
                 // it can be scrolled back to, same as a live turn's completion notice.
                 chatLog.markTurnEnd()
             }
-            is SandboxAgentEvent.AgentMessageChunk -> chatLog.appendAgentChunk(event.text)
+            // An answer, a tool call, a plan or a permission request means the agent has moved on
+            // from what it was thinking: the strip is hidden until the next thought arrives.
+            is SandboxAgentEvent.AgentMessageChunk -> {
+                thinking.endThought()
+                chatLog.appendAgentChunk(event.text)
+            }
             is SandboxAgentEvent.AgentThoughtChunk -> thinking.append(event.text)
-            is SandboxAgentEvent.ToolCallStarted -> showToolCall(event.toolCall, restored = replayingHistory)
+            is SandboxAgentEvent.ToolCallStarted -> {
+                thinking.endThought()
+                showToolCall(event.toolCall, restored = replayingHistory)
+            }
             is SandboxAgentEvent.ToolCallUpdated -> updateToolCall(event.toolCall)
-            is SandboxAgentEvent.PlanUpdated -> chatLog.showPlan(event.entries)
+            is SandboxAgentEvent.PlanUpdated -> {
+                thinking.endThought()
+                chatLog.showPlan(event.entries)
+            }
             is SandboxAgentEvent.ModeChanged -> modeSelector.selectMatching { it.id == event.modeId }
             is SandboxAgentEvent.ModelChanged -> modelSelector.selectMatching { it.id == event.modelId }
             is SandboxAgentEvent.ConfigOptionsChanged -> populateConfigOptions(event.configOptions)
             is SandboxAgentEvent.SessionSelectorsUpdated ->
                 populateSelectors(event.models, event.modes, event.configOptions)
             is SandboxAgentEvent.CommandsAvailable -> promptInput.setAvailableCommands(event.commands)
-            is SandboxAgentEvent.PermissionRequested -> showPermissionCard(event.request)
+            is SandboxAgentEvent.PermissionRequested -> {
+                thinking.endThought()
+                showPermissionCard(event.request)
+            }
             is SandboxAgentEvent.UsageUpdated -> updateTokenUsageButton(event)
             is SandboxAgentEvent.Error -> chatLog.appendError(event.message)
             // The list itself is read from the service when the dropdown is opened.

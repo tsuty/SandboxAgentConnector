@@ -16,6 +16,10 @@ import javax.swing.SwingUtilities
  * The chain of thought is not part of the transcript while it streams: it is written into this
  * small, scrolling area which only shows the last few lines and disappears when the turn ends
  * (see [SandboxAgentMainPanel]), so the transcript itself never fills up with thinking.
+ *
+ * ACP has no "thought finished" signal, so once the agent moves on (answers, calls a tool, ...) the
+ * whole strip is taken off screen by [endThought]: the thought no longer describes what the agent is
+ * doing, and what it does instead (a tool call, an answer) already shows in the transcript.
  */
 class ThinkingStatusPanel : BackgroundPanel(BorderLayout(0, JBUI.scale(2))) {
 
@@ -50,9 +54,12 @@ class ThinkingStatusPanel : BackgroundPanel(BorderLayout(0, JBUI.scale(2))) {
      */
     private val pendingWhitespace = StringBuilder()
 
+    /** Thoughts of the running turn already taken off screen by [endThought]. */
+    private val endedThoughts = StringBuilder()
+
     /** Everything the agent has been thinking during the running turn. */
     val thought: String
-        get() = area.text + pendingWhitespace
+        get() = endedThoughts.toString() + area.text + pendingWhitespace
 
     /** The text shown in the strip. */
     internal val displayedText: String
@@ -78,10 +85,27 @@ class ThinkingStatusPanel : BackgroundPanel(BorderLayout(0, JBUI.scale(2))) {
         SwingUtilities.invokeLater { area.caretPosition = area.document.length }
     }
 
+    /**
+     * The agent has moved on from the current thought: the strip is hidden until the next thought
+     * arrives, while the text stays part of [thought].
+     */
+    fun endThought() {
+        if (area.text.isEmpty()) return
+        endedThoughts.append(area.text).append(pendingWhitespace)
+        // The next thought starts a paragraph of its own once the turn is folded into the transcript.
+        if (pendingWhitespace.isEmpty()) endedThoughts.append("\n\n")
+        area.text = ""
+        pendingWhitespace.setLength(0)
+        isVisible = false
+        revalidate()
+        repaint()
+    }
+
     /** Drops the collected thought and hides the strip again. */
     fun clear() {
         area.text = ""
         pendingWhitespace.setLength(0)
+        endedThoughts.setLength(0)
         isVisible = false
         revalidate()
         repaint()

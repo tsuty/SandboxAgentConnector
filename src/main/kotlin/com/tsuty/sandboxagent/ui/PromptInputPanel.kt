@@ -18,6 +18,7 @@ import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
 import com.intellij.ui.EditorTextField
 import com.intellij.ui.JBColor
+import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.ui.JBUI
 import com.tsuty.sandboxagent.acp.AvailableCommand
 import com.tsuty.sandboxagent.actions.InsertNewlineAction
@@ -344,7 +345,7 @@ class PromptInputPanel(
                 g2.stroke = BasicStroke(1f)
                 // Half a pixel in, so the 1px wide stroke lands on the pixel row it is drawn along
                 // instead of being spread over two by the antialiasing.
-                val diameter = JBUI.scale(2f * SandboxAgentLayout.CONTENT_ARC)
+                val diameter = JBUIScale.scale(2f * SandboxAgentLayout.CONTENT_ARC)
                 g2.draw(
                     RoundRectangle2D.Float(
                         x + 0.5f,

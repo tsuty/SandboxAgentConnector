@@ -739,7 +739,7 @@ class SandboxAgentService(
         if (registry != null && local == null) return false
         val store = metadataStore()
         if (store != null && !store.tryLock(sessionId, lockOwnerId(), LOCK_TTL_MILLIS, now)) {
-            local?.let { registry?.rollback(sessionId, it) }
+            local?.let { registry.rollback(sessionId, it) }
             return false
         }
         heldSessionIds += sessionId

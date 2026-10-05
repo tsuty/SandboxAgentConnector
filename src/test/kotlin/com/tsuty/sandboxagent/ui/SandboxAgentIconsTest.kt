@@ -1,7 +1,9 @@
 package com.tsuty.sandboxagent.ui
 
+import com.intellij.openapi.util.IconLoader
 import com.intellij.ui.LayeredIcon
 import com.intellij.util.SVGLoader
+import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import java.awt.image.BufferedImage
 import java.io.File
@@ -222,6 +224,17 @@ class SandboxAgentIconsTest {
         File("src/main/resources/icons").listFiles { file -> file.extension == "svg" }.orEmpty().toList()
 
     private companion object {
+        /**
+         * `IconLoader` starts deactivated on a headless JVM (a Linux CI or sandbox without a
+         * display) and then hands out a 1x1 empty icon for every bundled icon; a desktop JVM
+         * (macOS) starts activated, which hid this.
+         */
+        @JvmStatic
+        @BeforeAll
+        fun activateIconLoader() {
+            IconLoader.activate()
+        }
+
         /** Stands for what a registry entry ships: a colored drawing filling its whole view box. */
         const val AGENT_SVG =
             """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#d97757"/></svg>"""

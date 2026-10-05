@@ -37,4 +37,36 @@ class ThinkingStatusPanelTest {
         assertEquals("", panel.thought)
         assertFalse(panel.isVisible)
     }
+
+    /**
+     * Once the agent moves on (answers, calls a tool) the last thought no longer describes what it
+     * is doing: the strip is hidden until the next thought, the whole thought is still kept.
+     */
+    @Test
+    fun `ending a thought hides the strip but keeps the whole thought`() {
+        val panel = ThinkingStatusPanel()
+        panel.append("最初の考えです。")
+        assertTrue(panel.isVisible)
+        panel.endThought()
+        assertEquals("", panel.displayedText)
+        assertFalse(panel.isVisible)
+
+        panel.append("次の考えです。\n\n")
+        assertTrue(panel.isVisible)
+        assertEquals("次の考えです。", panel.displayedText)
+        panel.endThought()
+        assertEquals("最初の考えです。\n\n次の考えです。\n\n", panel.thought)
+
+        panel.clear()
+        assertEquals("", panel.thought)
+        assertFalse(panel.isVisible)
+    }
+
+    @Test
+    fun `ending a thought before any thought keeps the strip hidden`() {
+        val panel = ThinkingStatusPanel()
+        panel.endThought()
+        assertFalse(panel.isVisible)
+        assertEquals("", panel.thought)
+    }
 }

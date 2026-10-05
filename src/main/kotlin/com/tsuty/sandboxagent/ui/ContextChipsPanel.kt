@@ -13,7 +13,6 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFile
@@ -180,7 +179,8 @@ class ContextChipsPanel(private val project: Project) :
      * before it reaches the strip.
      */
     private fun scheduleAutoAttachPreview() {
-        if (Disposer.isDisposed(this)) return
+        // The alarm is a child of this panel, so it is disposed together with it.
+        if (previewAlarm.isDisposed) return
         previewAlarm.cancelAllRequests()
         previewAlarm.addRequest({ refreshAutoAttachPreview() }, PREVIEW_DELAY_MS)
     }
