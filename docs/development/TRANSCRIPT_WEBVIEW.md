@@ -256,8 +256,8 @@ out gets three fresh ones.
 
 * Streaming shows plain text and switches to rendered Markdown when the block is finished.
 * Tool calls between two conversation blocks are folded into one group; the group shows
-  `Working… 12s` while it runs and `Worked 12s` once closed. A replayed history reports no start
-  time, so it only shows `Worked`.
+  `Working… 12s` with a spinner while it runs and `Worked 12s` once closed. A replayed history
+  reports no start time, so it only shows `Worked`.
 * Folding an entry keeps the clicked line where it is on screen; appending keeps the transcript
   pinned to the bottom only when it already was at the bottom.
 * Sending a prompt scrolls down there first (`SandboxAgentMainPanel.submitPrompt` ->

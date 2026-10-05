@@ -151,6 +151,23 @@ pre.stream {
 
 .anchor-text { min-width: 0; overflow-wrap: anywhere; }
 
+/* Next to the `Working…` label of an open tool call group; removed once the group closes. */
+.spinner {
+  flex: 0 0 auto;
+  width: 0.9em;
+  height: 0.9em;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.7s; }
+}
+
 /* One line rows (a tool call, the label of a group) are cut off, never wrapped: see .toolcall-line */
 .toolcall-line .anchor { width: auto; overflow: hidden; }
 

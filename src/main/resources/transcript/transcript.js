@@ -365,6 +365,10 @@
             var node = el('div', 'entry group');
             var body = el('div', 'group-body');
             var button = anchor('', body, 'group-anchor');
+            // Spins next to `Working…` for as long as the group is open (see .spinner).
+            var spinner = el('span', 'spinner');
+            spinner.setAttribute('aria-hidden', 'true');
+            button.insertBefore(spinner, button.querySelector('.anchor-text'));
             node.appendChild(button);
             node.appendChild(body);
             group = {node: node, body: body, anchor: button, timed: event.timed !== false, start: Date.now()};
@@ -382,6 +386,8 @@
                 window.clearInterval(group.timer);
                 group.timer = null;
             }
+            var spinner = group.anchor.querySelector('.spinner');
+            if (spinner) spinner.remove();
             expand(group.anchor, group.body, false);
         } else if (group.timed && !group.timer) {
             group.timer = window.setInterval(function () { groupLabel(group); }, 3000);
