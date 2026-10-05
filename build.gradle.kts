@@ -1,7 +1,9 @@
+import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask
+
 plugins {
     kotlin("jvm") version "2.4.10"
     kotlin("plugin.serialization") version "2.4.10"
-    id("org.jetbrains.intellij.platform") version "2.10.1"
+    id("org.jetbrains.intellij.platform") version "2.19.0"
 }
 
 group = providers.gradleProperty("pluginGroup").get()
@@ -38,6 +40,13 @@ dependencies {
 
 kotlin {
     jvmToolchain(providers.gradleProperty("javaVersion").get().toInt())
+    compilerOptions {
+        // The Kotlin stdlib comes from the IDE at runtime (2.0 for 2024.2, see pluginSinceBuild):
+        // newer API levels emit coroutine debug metadata it rejects ("Debug metadata version
+        // mismatch"), which broke coroutine resumption in the tests once the platform's coroutines
+        // debug agent is attached.
+        apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_0)
+    }
 }
 
 intellijPlatform {
@@ -51,6 +60,13 @@ intellijPlatform {
     }
 
     pluginVerification {
+        // The defaults of the Gradle plugin minus INTERNAL_API_USAGES: the plugin still relies on a
+        // few internal APIs (SVGLoader, InternalDecoratorImpl, stubs Kotlin generates for
+        // ToolWindowFactory), which the verifier keeps reporting without failing the build.
+        failureLevel = listOf(
+            VerifyPluginTask.FailureLevel.COMPATIBILITY_PROBLEMS,
+            VerifyPluginTask.FailureLevel.OVERRIDE_ONLY_API_USAGES,
+        )
         ides {
             // Lower bound: matches platformVersion / pluginSinceBuild=242.
             create("IC", "2024.2.5")

@@ -46,8 +46,8 @@ class LocalSessionIndexTest {
         val files = assertNotNull(index.of("sess_1"))
         assertNotNull(files.current)
         assertEquals(listOf(300L, 200L, 100L), files.backups.map { it.timestamp })
-        assertEquals(10L, files.current!!.sizeBytes)
-        assertEquals(1L, files.current!!.sizeKb)
+        assertEquals(10L, files.current.sizeBytes)
+        assertEquals(1L, files.current.sizeKb)
         assertEquals(listOf(50L), assertNotNull(index.of("sess_2")).deleted.map { it.timestamp })
         assertEquals(setOf("sess_1", "sess_2"), index.bySanitizedId.keys)
     }

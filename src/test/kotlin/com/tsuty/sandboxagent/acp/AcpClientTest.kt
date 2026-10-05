@@ -261,7 +261,7 @@ class AcpClientTest {
         )
 
         assertEquals(AcpMethods.SESSION_UPDATE, assertNotNull(notification).method)
-        val payload = AcpJson.decodeFromJsonElement(SessionNotification.serializer(), notification!!.params!!)
+        val payload = AcpJson.decodeFromJsonElement(SessionNotification.serializer(), notification.params!!)
         assertEquals("hi", assertIs<AgentMessageChunkUpdate>(payload.update).content.plainText)
     }
 
