@@ -37,7 +37,10 @@ import javax.swing.JPanel
  * delay so dragging over the text does not make the strip flicker on every intermediate range.
  */
 class ContextChipsPanel(private val project: Project) :
-    JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(CHIP_GAP), JBUI.scale(CHIP_GAP))), Disposable {
+    // WrapFlowLayout rather than FlowLayout: the strip sits in a BorderLayout.NORTH slot that hands
+    // out exactly the preferred height, and plain FlowLayout reports a single row even when the
+    // chips wrap, which clipped every attachment past the first row out of sight.
+    JPanel(WrapFlowLayout(FlowLayout.LEFT, JBUI.scale(CHIP_GAP), JBUI.scale(CHIP_GAP))), Disposable {
 
     private data class Entry(val key: String, val label: String, val item: AcpContextItem)
 
