@@ -84,4 +84,36 @@ class SessionSelectorsTest {
         assertTrue(SessionSelectors.EMPTY.isEmpty)
         assertEquals("", SessionSelectors.EMPTY.presentableState())
     }
+
+    private val withModes = SessionSelectors(
+        models = null,
+        modes = SessionModeState("default", listOf(SessionMode("default"), SessionMode("plan"), SessionMode("acceptEdits"))),
+        configOptions = emptyList(),
+    )
+
+    @Test
+    fun `an unanswered mode request is assumed to have taken effect`() {
+        val after = withModes.withRequestedMode("plan", reported = null, modeBeforeRequest = "default")
+
+        assertEquals("plan", after.modes?.currentModeId)
+    }
+
+    @Test
+    fun `a mode notified while the request was pending is not overwritten`() {
+        // `current_mode_update` reported `acceptEdits` before `session/set_mode plan` was answered.
+        val notified = withModes.withCurrentMode("acceptEdits")
+
+        val after = notified.withRequestedMode("plan", reported = null, modeBeforeRequest = "default")
+
+        assertEquals("acceptEdits", after.modes?.currentModeId)
+    }
+
+    @Test
+    fun `a reported mode state wins over the requested mode`() {
+        val reported = SessionModeState("acceptEdits", withModes.modes!!.availableModes)
+
+        val after = withModes.withRequestedMode("plan", reported, modeBeforeRequest = "default")
+
+        assertEquals("acceptEdits", after.modes?.currentModeId)
+    }
 }

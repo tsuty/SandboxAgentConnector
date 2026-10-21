@@ -703,6 +703,33 @@ class AcpModelsTest {
         assertNull(file.promptAttachments.single().content)
     }
 
+    /**
+     * The URI an attachment is sent with is percent-encoded, so the mention an agent replays it
+     * as is still one URI: a space or a parenthesis no longer cuts the path short.
+     */
+    @Test
+    fun `an attachment with spaces, parentheses and non ASCII characters survives the replay`() {
+        val path = "/workspace/資料 (1)+a.md"
+        val sent = AcpContextItem(path = path, content = "# 資料").toContentBlock() as EmbeddedResourceContentBlock
+        val selection = AcpContextItem(path = path, content = "x", startLine = 2, endLine = 3)
+            .toContentBlock() as EmbeddedResourceContentBlock
+
+        assertEquals("file:///workspace/%E8%B3%87%E6%96%99%20%281%29%2Ba.md", sent.resource.uri)
+        val mention = TextContentBlock("Read this [@資料 (1)+a.md](${sent.resource.uri})")
+        assertEquals(PromptAttachment(path = path), mention.promptAttachments.single())
+        assertEquals("Read this", mention.userPromptText)
+        assertEquals(
+            PromptAttachment(path = path, startLine = 2, endLine = 3),
+            ResourceLinkContentBlock(uri = selection.resource.uri).promptAttachments.single(),
+        )
+    }
+
+    @Test
+    fun `a plain path is left as it is in the URI`() {
+        assertEquals("/workspace/src/Main_v2.kt", encodeUriPath("/workspace/src/Main_v2.kt"))
+        assertEquals("C:/work/a~b.txt", encodeUriPath("C:/work/a~b.txt"))
+    }
+
     /** The same attachment replayed twice is one chip, and the snippet is not lost to the copy. */
     @Test
     fun `an attachment replayed as both markups keeps its content`() {

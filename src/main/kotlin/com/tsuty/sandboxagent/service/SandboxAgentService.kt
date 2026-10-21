@@ -61,6 +61,7 @@ import com.tsuty.sandboxagent.acp.plainText
 import com.tsuty.sandboxagent.acp.promptAttachments
 import com.tsuty.sandboxagent.acp.userPromptText
 import com.tsuty.sandboxagent.session.LocalSessionFile
+import com.tsuty.sandboxagent.session.LocalSessionIndex
 import com.tsuty.sandboxagent.session.SessionLockRegistry
 import com.tsuty.sandboxagent.session.SessionMetadataStore
 import com.tsuty.sandboxagent.session.SessionSnapshot
@@ -284,6 +285,20 @@ data class SessionSelectors(
 
     fun withCurrentMode(modeId: String): SessionSelectors =
         if (modes == null) this else copy(modes = modes.copy(currentModeId = modeId))
+
+    /**
+     * The state after `session/set_mode` for [requested] was answered. The answer is the state
+     * that took effect when it reports one; otherwise the requested mode is assumed — unless a
+     * `current_mode_update` arrived while waiting (the current mode is no longer
+     * [modeBeforeRequest]): it names the mode the agent actually switched to, which may differ
+     * from the requested one, so it is kept.
+     */
+    fun withRequestedMode(requested: String, reported: SessionModeState?, modeBeforeRequest: String?): SessionSelectors =
+        when {
+            reported != null -> withModes(reported)
+            modes?.currentModeId != modeBeforeRequest -> this
+            else -> withCurrentMode(requested)
+        }
 
     /** `id=value` of every selector, so the `idea.log` trail shows what actually took effect. */
     fun presentableState(): String = (
@@ -859,8 +874,13 @@ class SandboxAgentService(
         // The pristine session has nothing in it yet, so it is not offered as a session to enter.
         val pristine = pristineSessionId()
         val sessions = try {
-            acpClient.listSessions(SessionListParams(cwd = resolvedCwd())).sessions
-                .filterNot { it.sessionId == pristine }
+            val listed = acpClient.listSessions(SessionListParams(cwd = resolvedCwd())).sessions
+            // Deleted in the IDE, but still known to an agent that could not delete it.
+            val local = runCatching { snapshotStore.index() }
+                .onFailure { log.warn("Failed to list the local sessions", it) }
+                .getOrDefault(LocalSessionIndex.EMPTY)
+            listed
+                .filterNot { it.sessionId == pristine || local.isDeleted(it.sessionId) }
                 .map(::applyLocalTitle)
         } catch (e: Exception) {
             log.info("session/list failed", e)
@@ -1146,7 +1166,7 @@ class SandboxAgentService(
         publish(SandboxAgentEvent.UserPrompt(prompt, context.map { it.toAttachment() }))
         // The agent edits the workspace from the sandbox: the IDE flushes its buffers and locks
         // the editors for the turn, so a local edit cannot race those writes.
-        workspaceGuard()?.turnStarted()
+        workspaceGuard()?.turnStarted(this)
         turnRunningRef.set(true)
         publish(SandboxAgentEvent.TurnStarted)
         try {
@@ -1165,7 +1185,7 @@ class SandboxAgentService(
             finishTurn(null)
             cancelPendingPermissions()
             // Unlocks the editors again and pulls in whatever the agent wrote during the turn.
-            workspaceGuard()?.turnFinished()
+            workspaceGuard()?.turnFinished(this)
             // The turn boundary is the only point where the transcript is complete and stable.
             saveSnapshotAfterTurn(sessionId)
         }
@@ -1238,11 +1258,11 @@ class SandboxAgentService(
         val acpClient = client ?: return@launch
         val sessionId = sessionIdRef.get() ?: return@launch
         try {
-            // The answer is the state that took effect; agents that report none leave `modeId`.
+            val modeBeforeRequest = selectorsRef.get()?.modes?.currentModeId
             val reported = acpClient.setMode(sessionId, modeId).modes
-            val merged = mergeSelectors { it.withModes(reported).withCurrentMode(modeId) }
+            val merged = mergeSelectors { it.withRequestedMode(modeId, reported, modeBeforeRequest) }
             if (reported != null) publish(merged.toEvent())
-            publish(SandboxAgentEvent.ModeChanged(reported?.currentModeId ?: modeId))
+            publish(SandboxAgentEvent.ModeChanged(merged.modes?.currentModeId ?: modeId))
         } catch (e: Exception) {
             publish(SandboxAgentEvent.Error(e.message ?: "session/set_mode failed", e))
         }
@@ -1335,7 +1355,7 @@ class SandboxAgentService(
         suppressedReplays.clear()
         recorder.clear()
         // A closed session runs no turn: the editors must not stay locked behind it.
-        workspaceGuard()?.reset()
+        workspaceGuard()?.reset(this)
         if (state != SessionState.ERROR) {
             setState(SessionState.DISCONNECTED)
         }

@@ -65,6 +65,16 @@ class LocalSessionIndex(val bySanitizedId: Map<String, LocalSessionFiles>) {
         return if (files.current == null) emptyList() else files.backups
     }
 
+    /**
+     * `true` when [sessionId] was deleted in the IDE: its files were moved aside and no current
+     * snapshot was written since. The session list leaves such a session out even when the agent
+     * still lists it, because it lacks `session/delete` or failed to run it.
+     */
+    fun isDeleted(sessionId: String): Boolean {
+        val files = of(sessionId) ?: return false
+        return files.current == null && files.deleted.isNotEmpty()
+    }
+
     /** The files the local session search reads: current snapshots and backups, deleted ones on request. */
     fun searchable(includeDeleted: Boolean): List<LocalSessionFile> =
         bySanitizedId.values.flatMap { files ->

@@ -1269,11 +1269,36 @@ data class AcpContextItem(
         content = content.takeIf { presentableRange != null && it.isNotEmpty() },
     )
 
+    /**
+     * Percent-encoded, so a replayed mention of a path with spaces, parentheses or non-ASCII
+     * characters is still read back as one URI (see [promptAttachments]).
+     */
     private fun uri(): String {
-        val base = if (path.startsWith("/")) "file://$path" else "file:///$path"
+        val encoded = encodeUriPath(path)
+        val base = if (path.startsWith("/")) "file://$encoded" else "file:///$encoded"
         return presentableRange?.let { "$base#L$it" } ?: base
     }
 }
+
+/** Characters a file URI path keeps as they are; everything else is percent-encoded as UTF-8. */
+private const val URI_PATH_UNRESERVED = "-._~/:"
+
+/**
+ * Encodes [path] for a `file://` URI. `+` is encoded as well: [decodePath] uses [URLDecoder],
+ * which would read a bare `+` as a space.
+ */
+fun encodeUriPath(path: String): String = buildString {
+    path.toByteArray(StandardCharsets.UTF_8).forEach { byte ->
+        val char = (byte.toInt() and 0xFF).toChar()
+        if (char.isAsciiLetterOrDigit() || char in URI_PATH_UNRESERVED) {
+            append(char)
+        } else {
+            append('%').append("%02X".format(byte.toInt() and 0xFF))
+        }
+    }
+}
+
+private fun Char.isAsciiLetterOrDigit(): Boolean = this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9'
 
 /** `true` when the JSON-RPC id is present and not `null`. */
 fun JsonElement?.asRpcId(): JsonRpcId? = (this as? JsonPrimitive)?.takeIf { it !== JsonNull }

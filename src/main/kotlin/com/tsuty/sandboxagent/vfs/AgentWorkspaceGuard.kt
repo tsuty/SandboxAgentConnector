@@ -8,7 +8,7 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Keeps the IDE in sync with the files the agent edits inside the sandbox, and keeps the user out
@@ -26,34 +26,40 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * Unsaved documents are flushed to disk before the turn starts: the agent reads the files, not the
  * in-memory buffers of the IDE.
+ *
+ * Every tab runs its own session, so turns of several tabs may overlap: each turn is tracked by
+ * its owner (see [AgentTurns]), and the workspace stays locked while any of them runs.
  */
 class AgentWorkspaceGuard(private val project: Project) {
     private val log = Logger.getInstance(AgentWorkspaceGuard::class.java)
 
-    private val turnRunning = AtomicBoolean(false)
+    private val turns = AgentTurns()
 
     val isTurnRunning: Boolean
-        get() = turnRunning.get()
+        get() = turns.isAnyRunning
 
     /**
-     * Flushes the unsaved documents and locks the workspace for the running turn. The lock is
+     * Flushes the unsaved documents and locks the workspace for the turn of [owner]. The lock is
      * skipped when the user turned it off in the settings; the flush is not, because the agent
      * would otherwise read a stale file.
      */
-    fun turnStarted() {
-        if (!turnRunning.compareAndSet(false, true)) return
+    fun turnStarted(owner: Any) {
+        if (!turns.start(owner)) return
         saveDocuments()
     }
 
-    /** Unlocks the workspace and pulls in whatever the agent wrote during the turn. */
-    fun turnFinished() {
-        if (!turnRunning.compareAndSet(true, false)) return
+    /**
+     * Ends the turn of [owner] and pulls in whatever its agent wrote. The workspace is unlocked
+     * once no other turn is running.
+     */
+    fun turnFinished(owner: Any) {
+        if (!turns.finish(owner)) return
         refreshWorkspace()
     }
 
-    /** Called when the session goes away without a turn boundary (disconnect, dispose). */
-    fun reset() {
-        turnRunning.set(false)
+    /** Called when the session of [owner] goes away without a turn boundary (disconnect, dispose). */
+    fun reset(owner: Any) {
+        turns.finish(owner)
     }
 
     /**
@@ -117,6 +123,20 @@ class AgentWorkspaceGuard(private val project: Project) {
         /** `null` when the project service is unavailable (light tests). */
         fun getInstanceOrNull(project: Project): AgentWorkspaceGuard? = runCatching { getInstance(project) }.getOrNull()
     }
+}
+
+/** The owners (one per tab session) whose turn is running; kept free of the IDE so it can be unit tested. */
+class AgentTurns {
+    private val owners = ConcurrentHashMap.newKeySet<Any>()
+
+    val isAnyRunning: Boolean
+        get() = owners.isNotEmpty()
+
+    /** `false` when the turn of [owner] was already running. */
+    fun start(owner: Any): Boolean = owners.add(owner)
+
+    /** `false` when [owner] had no running turn. */
+    fun finish(owner: Any): Boolean = owners.remove(owner)
 }
 
 /** Path arithmetic of the guard, kept free of the IDE so it can be unit tested. */

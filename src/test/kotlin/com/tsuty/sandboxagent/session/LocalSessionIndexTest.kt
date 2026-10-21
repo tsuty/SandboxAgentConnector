@@ -4,8 +4,10 @@ import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** File name rules, grouping and states of the local session directory index. */
 class LocalSessionIndexTest {
@@ -94,6 +96,18 @@ class LocalSessionIndexTest {
             index.searchable(includeDeleted = false).map { it.kind }.toSet(),
         )
         assertEquals(3, index.searchable(includeDeleted = true).size)
+    }
+
+    @Test
+    fun `a session is deleted while only its moved aside files are left`() {
+        val index = LocalSessionIndex.scan(
+            directoryWith("gone.json.1.deleted", "back.json.2.deleted", "back.json", "kept.json", "kept.json.3.backup"),
+        )
+
+        assertTrue(index.isDeleted("gone"))
+        assertFalse(index.isDeleted("back"))
+        assertFalse(index.isDeleted("kept"))
+        assertFalse(index.isDeleted("unknown"))
     }
 
     @Test
