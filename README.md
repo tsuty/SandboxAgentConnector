@@ -25,6 +25,17 @@ While leveraging the IDE's lightweight nature and rich GUI (editor, Diff viewers
 - **JDK**: JDK 21 for building (`kotlin { jvmToolchain(21) }`; Gradle must be able to resolve a JDK 21 toolchain, while the JVM running Gradle itself only needs 17 or higher)
 - **Sandbox Environment**: Docker Sandboxes (`sbx`), Docker, Apple Container, WSL Containers, etc.
 
+### Verified Combinations
+
+The following combinations of ACP agent and sandbox environment have been verified to work.
+Other combinations may work but have not been tested yet.
+
+| ACP Agent    | Docker Sandboxes (`sbx`) | Docker | Apple Container | WSL Containers |
+|--------------|:------------------------:|:------:|:---------------:|:--------------:|
+| Claude Agent |            ✅            |   —    |        —        |       —        |
+
+✅ Verified / — Not verified yet
+
 ---
 
 ## Quick Start
