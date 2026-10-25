@@ -160,6 +160,18 @@
             <keyboard-shortcut keymap="$default" first-keystroke="shift ENTER"/>
         </action>
 
+        <!-- `+` of the tab strip and its caret, as actions without a default shortcut, so they can be
+             run from Find Action and bound in the Keymap. -->
+        <action id="com.tsuty.sandboxagent.actions.NewTab"
+                class="com.tsuty.sandboxagent.actions.NewTabAction"
+                icon="AllIcons.General.Add"
+                text="New Sandbox Agent Tab"
+                description="Opens a Sandbox Agent tab with the default agent"/>
+        <action id="com.tsuty.sandboxagent.actions.NewTabWithAgent"
+                class="com.tsuty.sandboxagent.actions.NewTabWithAgentAction"
+                text="New Sandbox Agent Tab with Agent…"
+                description="Picks one of the enabled agents and opens a Sandbox Agent tab with it"/>
+
         <!-- These are put into the `Options` menu of the tool window header by
              SandboxAgentToolWindowFactory; they are registered here so they can be found and bound
              to a shortcut like any other action. -->

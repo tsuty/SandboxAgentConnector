@@ -6,8 +6,10 @@ import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.tsuty.sandboxagent.acp.SessionListEntry
@@ -79,6 +81,9 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
     private val tabStrip = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(2), 0)).apply { isOpaque = false }
     private val addButton = FlatIconButton(AllIcons.General.Add, "New Tab") { addTab() }
 
+    /** The caret of `+`: lists every enabled agent, and opens a tab with the one picked. */
+    private val agentsButton = FlatIconButton(AllIcons.General.ChevronDown, "New Tab with Agent…") { showAgentChooser() }
+
     /** [Tab.id] → the chip rendered for it; rebuilt on every structural change ([renderTabStrip]). */
     private val chips = LinkedHashMap<Int, TabChip>()
 
@@ -92,7 +97,7 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         bar.isOpaque = false
         bar.border = JBUI.Borders.empty(2, 4)
         bar.add(tabStrip, BorderLayout.WEST)
-        val addWrapper = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { isOpaque = false; add(addButton) }
+        val addWrapper = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { isOpaque = false; add(addButton); add(agentsButton) }
         bar.add(addWrapper, BorderLayout.CENTER)
 
         add(bar, BorderLayout.NORTH)
@@ -129,9 +134,46 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         }
     }
 
+    /**
+     * Opens a tab with [agentId] — the default agent of the settings when `null` — and connects
+     * it; reports the limit instead once [TabsController.canAddTab] is `false`.
+     */
+    fun openNewTab(agentId: String? = null) {
+        if (addTab(agentId) == null) notify(TAB_LIMIT_MESSAGE)
+    }
+
+    /**
+     * The enabled agents, the default one first marked as such, under [anchor] — the caret of
+     * `+` when it is visible, the middle of the tool window otherwise (Find Action, a shortcut).
+     */
+    fun showAgentChooser(anchor: JComponent? = null) {
+        if (!controller.canAddTab) {
+            notify(TAB_LIMIT_MESSAGE)
+            return
+        }
+        val settings = SandboxAgentSettingsState.getInstance(project)
+        val default = settings.defaultAgent()
+        val agents = settings.enabledAgents()
+        val popup = JBPopupFactory.getInstance()
+            .createPopupChooserBuilder(agents)
+            .setRenderer(
+                SimpleListCellRenderer.create { label, entry, _ ->
+                    label.text = if (entry.id == default.id) "${entry.nameOrDefault()} (default)" else entry.nameOrDefault()
+                    label.icon = SandboxAgentIcons.agentIcon(entry.iconSvgOrNull(), AgentMark.NONE, settings.agentColorOrNull(entry.id))
+                },
+            )
+            .setTitle("New Tab with Agent")
+            .setNamerForFiltering { it.nameOrDefault() }
+            .setItemChosenCallback { entry -> openNewTab(entry.id) }
+            .createPopup()
+        val target = anchor ?: agentsButton.takeIf { it.isShowing }
+        if (target != null) popup.showUnderneathOf(target) else popup.showInCenterOf(this)
+    }
+
     /** Creates a fresh tab and connects it; `null` once [TabsController.canAddTab] is `false`. */
-    private fun addTab(): Tab? {
-        val tab = controller.addTab() ?: return null
+    private fun addTab(agentId: String? = null): Tab? {
+        if (!controller.canAddTab) return null
+        val tab = controller.addTab(SandboxAgentService(project, agentId = agentId, readOnlySource = null)) ?: return null
         cards.add(tab.panel, tab.id.toString())
         tab.service.connect()
         tab.service.addListener(SandboxAgentEventListener { event -> onEdt { onTabEvent(tab, event) } })
@@ -363,6 +405,8 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         }
         addButton.isEnabled = controller.canAddTab
         addButton.toolTipText = if (controller.canAddTab) "New Tab" else "Tab limit reached (10)"
+        agentsButton.isEnabled = controller.canAddTab
+        agentsButton.toolTipText = if (controller.canAddTab) "New Tab with Agent…" else "Tab limit reached (10)"
         tabStrip.revalidate()
         tabStrip.repaint()
     }
