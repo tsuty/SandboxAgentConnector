@@ -20,6 +20,13 @@ The sandbox still fronts it, so the sandbox named in the settings has to be runn
 the script; the connection health check runs `echo sandbox-agent-connector` through the same sandbox
 and only looks at the exit code, so it passes without the script being involved at all.
 
+## Colliding session ids
+
+`--session-id <id>` makes `session/new` answer with that id every time instead of a fresh one.
+Started under two different agents (two tabs whose agents each run the script with the same id),
+the second tab finds the local snapshot of the first and must refuse the session rather than
+overwrite it (see `docs/MultiAgent.ja.md` §3.4).
+
 ## What it sends
 
 - `session/new` answers with two modes, `architect` (current) and `code`.

@@ -81,7 +81,9 @@ class FakeAgent:
                 "authMethods": [],
             })
         elif method == "session/new":
-            self.session_id = str(uuid.uuid4())
+            # `--session-id <id>` hands out the same id every time: two of these agents, enabled
+            # under different registry ids, collide on it in the shared local session directory.
+            self.session_id = FIXED_SESSION_ID or str(uuid.uuid4())
             respond(message["id"], {
                 "sessionId": self.session_id,
                 "modes": {"currentModeId": self.current_mode, "availableModes": MODES},
@@ -160,5 +162,17 @@ class FakeAgent:
         self.pending_prompt_id = None
 
 
+def fixed_session_id(argv: list) -> str:
+    """The value of `--session-id`, or an empty string for a fresh id per session."""
+    if "--session-id" in argv:
+        index = argv.index("--session-id")
+        if index + 1 < len(argv):
+            return argv[index + 1]
+    return ""
+
+
+FIXED_SESSION_ID = ""
+
 if __name__ == "__main__":
+    FIXED_SESSION_ID = fixed_session_id(sys.argv[1:])
     FakeAgent().run()
