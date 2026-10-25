@@ -168,10 +168,6 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
             row {
                 comment("Sent as the ACP <code>cwd</code> of <code>session/new</code>, e.g. /workspace. Empty uses the local project root.")
             }
-            row {
-                checkBox("Restore the previous session when the agent supports session/load")
-                    .bindSelected(settings::restoreLastSession)
-            }
         }
 
         groupRowsRange("Workspace") {

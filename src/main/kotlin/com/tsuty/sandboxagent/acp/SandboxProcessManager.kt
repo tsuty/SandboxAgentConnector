@@ -22,8 +22,6 @@ data class SandboxConfig(
     val agentCommand: String = "npx -y @agentclientprotocol/claude-agent-acp",
     /** ACP `cwd`: the working directory **inside** the sandbox. Empty falls back to the project root. */
     val sandboxWorkspacePath: String = "",
-    /** Reuse the previous `sessionId` through `session/load` when the agent supports it. */
-    val restoreLastSession: Boolean = false,
     /**
      * Silence, in seconds, that ends the wait for `initialize`. The first run downloads the agent
      * through `npx`, which reports its progress on `stderr`, so only a complete lack of output

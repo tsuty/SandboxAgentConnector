@@ -20,7 +20,6 @@ class SettingsSerializationTest {
         assertEquals(listOf("claude-acp"), settings.enabledAgents().map { it.id })
         assertEquals("npx -y @agentclientprotocol/claude-agent-acp", settings.defaultAgent().agent().command)
         assertEquals("", settings.sandboxWorkspacePath)
-        assertFalse(settings.restoreLastSession)
         assertFalse(settings.autoAttachContext)
         assertEquals(180, settings.initializeIdleTimeoutSeconds)
     }

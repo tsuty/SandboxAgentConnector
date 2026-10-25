@@ -22,6 +22,7 @@ import com.tsuty.sandboxagent.service.SessionState
 import com.tsuty.sandboxagent.session.LocalSessionFile
 import com.tsuty.sandboxagent.session.LocalSessionKind
 import com.tsuty.sandboxagent.session.LocalSessionSearchResult
+import com.tsuty.sandboxagent.session.RecentSession
 import com.tsuty.sandboxagent.session.SessionMetadataStore
 import com.tsuty.sandboxagent.session.SessionSnapshotStore
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsBridge
@@ -89,6 +90,12 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
 
     private var selectedTab: Tab? = null
 
+    /** Shown instead of a tab while there is none (see [RecentSessionsPanel]). */
+    private val recentSessions = RecentSessionsPanel(project) { openRecentSession(it) }
+
+    /** `true` while [recentSessions] is the card in front. */
+    private var showingRecent = false
+
     /** Set once disposed: a Read Only tab whose file was still being read must not be added then. */
     private var disposed = false
 
@@ -102,6 +109,8 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
 
         add(bar, BorderLayout.NORTH)
         add(cards, BorderLayout.CENTER)
+        cards.add(recentSessions, RECENT_CARD)
+        Disposer.register(this, recentSessions)
 
         installShortcuts()
         // Picking another agent in the settings changes the drawing every chip's connection
@@ -109,11 +118,40 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         // downloaded (see `AgentIcon`).
         project.messageBus.connect(this).subscribe(
             SandboxAgentSettingsBridge.TOPIC,
-            SandboxAgentSettingsBridge.Listener { onEdt { chips.values.forEach { it.updateConnection() } } },
+            SandboxAgentSettingsBridge.Listener {
+                onEdt {
+                    chips.values.forEach { it.updateConnection() }
+                    // Which agents are enabled decides how a recent session opens and is labelled.
+                    if (showingRecent) recentSessions.refresh()
+                }
+            },
         )
-        // A tool window never opens empty: the first tab is created right away, exactly like the
-        // single panel this replaces used to connect eagerly on its own.
-        addTab()
+        // No tab is opened on its own: nothing connects until a session or an agent is picked,
+        // and the recent sessions of every agent are what the tool window starts with.
+        renderTabStrip()
+    }
+
+    /**
+     * Enters a recent session: in a new tab of its agent, or read only when that agent is not
+     * enabled (the same rules as a result of the local session search, see [openSearchResult]).
+     */
+    private fun openRecentSession(session: RecentSession) {
+        if (!SandboxAgentSettingsState.getInstance(project).isEnabled(session.agentId)) {
+            openReadOnlyTab(session.file)
+            return
+        }
+        restoreInNewTab(session.sessionId, session.title, session.agentId)
+    }
+
+    /** Puts [recentSessions] in front while there is no tab, and takes it away once there is one. */
+    private fun updateRecentSessions() {
+        val empty = controller.size == 0
+        if (empty && !showingRecent) {
+            selectedTab = null
+            cardLayout.show(cards, RECENT_CARD)
+            recentSessions.refresh()
+        }
+        showingRecent = empty
     }
 
     /**
@@ -414,6 +452,7 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
             chip.updateSelection()
             tabStrip.add(chip)
         }
+        updateRecentSessions()
         addButton.isEnabled = controller.canAddTab
         addButton.toolTipText = if (controller.canAddTab) "New Tab" else "Tab limit reached (10)"
         agentsButton.isEnabled = controller.canAddTab
@@ -833,6 +872,9 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
                 ?.firstNotNullOfOrNull { it.component as? SandboxAgentTabsPanel }
 
         private const val NOTIFICATION_GROUP = "Sandbox Agent Connector"
+
+        /** Card name of [recentSessions]; tab cards are named by their numeric [Tab.id]. */
+        private const val RECENT_CARD = "recent-sessions"
 
         private const val TAB_LIMIT_MESSAGE = "Tab limit reached (10): close a tab to open another one."
 
