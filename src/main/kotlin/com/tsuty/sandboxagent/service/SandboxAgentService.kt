@@ -481,6 +481,12 @@ class SandboxAgentService(
     /** Latest `session/list` result; empty while disconnected or on agents without `session/list`. */
     private val sessionsRef = AtomicReference<List<SessionListEntry>>(emptyList())
 
+    /**
+     * Sessions of the last `session/list` whose local snapshot belongs to another agent: the
+     * session list shows them as kept nowhere, and entering one is refused (see [conflictingOwner]).
+     */
+    private val foreignSessionsRef = AtomicReference<Set<String>>(emptySet())
+
     /** Title shown for the current session (agent reported, or the local rename override). */
     private val sessionTitleRef = AtomicReference<String?>(null)
 
@@ -529,6 +535,10 @@ class SandboxAgentService(
     /** Sessions reported by the last `session/list`, with the local renames applied. */
     val sessions: List<SessionListEntry>
         get() = sessionsRef.get()
+
+    /** Listed sessions whose local files belong to another agent (see [foreignSessionsRef]). */
+    val foreignSessionIds: Set<String>
+        get() = foreignSessionsRef.get()
 
     val sessionTitle: String?
         get() = sessionTitleRef.get()
@@ -930,9 +940,11 @@ class SandboxAgentService(
             val local = runCatching { snapshotStore.index() }
                 .onFailure { log.warn("Failed to list the local sessions", it) }
                 .getOrDefault(LocalSessionIndex.EMPTY)
-            listed
+            val shown = listed
                 .filterNot { it.sessionId == pristine || local.isDeleted(it.sessionId) }
                 .map(::applyLocalTitle)
+            foreignSessionsRef.set(foreignAmong(shown.map { it.sessionId }.filter { local.of(it)?.current != null }))
+            shown
         } catch (e: Exception) {
             log.info("session/list failed", e)
             emptyList()
@@ -942,6 +954,15 @@ class SandboxAgentService(
         sessionsRef.set(sessions)
         publish(SandboxAgentEvent.SessionsListed(sessions))
         return sessions
+    }
+
+    /** The [sessionIds] whose current snapshot belongs to an agent other than the one of this tab. */
+    private fun foreignAmong(sessionIds: List<String>): Set<String> {
+        val agent = snapshotAgent() ?: return emptySet()
+        return sessionIds.filterTo(HashSet()) { id ->
+            val owner = runCatching { snapshotStore.ownerOf(id, agent.legacyId) }.getOrNull()
+            owner != null && owner != agent.id
+        }
     }
 
     /** A session the user renamed locally is listed under that title, never under the agent's. */
@@ -1452,6 +1473,7 @@ class SandboxAgentService(
         turnRunningRef.set(false)
         commandsRef.set(emptyList())
         sessionsRef.set(emptyList())
+        foreignSessionsRef.set(emptySet())
         sessionTitleRef.set(null)
         suppressedReplays.clear()
         recorder.clear()

@@ -132,4 +132,16 @@ class LocalSessionSearchTest {
         assertEquals("not json with a needle inside", preview.text)
         assertEquals(listOf(16 until 22), preview.matches)
     }
+
+    @Test
+    fun `a snapshot names its agent to the search`() {
+        val withAgent = LocalSessionSearch.identify(
+            """{"sessionId":"s1","title":"T","agentId":"gemini","agentName":"Gemini CLI"}""",
+            "fallback",
+        )
+        assertEquals(SnapshotIdentity("s1", "T", "gemini", "Gemini CLI"), withAgent)
+
+        val old = LocalSessionSearch.identify("""{"sessionId":"s2"}""", "fallback")
+        assertEquals(SnapshotIdentity("s2", "s2", null, null), old)
+    }
 }

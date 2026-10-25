@@ -17,6 +17,12 @@ import javax.swing.Icon
  */
 internal object LocalSessionPresentation {
 
+    /**
+     * `Agent not enabled · {agent}`, the status of a Read Only tab showing the current snapshot of
+     * a session whose agent is not enabled: that is the only reason such a snapshot is read only.
+     */
+    fun agentNotEnabledStatus(agentName: String): String = "Agent not enabled · $agentName"
+
     /** `Backup · {date}` / `Deleted · {date}`, the status of a Read Only tab. */
     fun readOnlyStatus(file: LocalSessionFile, zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()): String {
         val date = file.timestamp?.let { dateTime(it, zone, locale) }

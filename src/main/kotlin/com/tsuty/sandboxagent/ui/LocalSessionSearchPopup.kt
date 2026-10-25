@@ -1,5 +1,6 @@
 package com.tsuty.sandboxagent.ui
 
+import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.editor.colors.EditorColors
@@ -62,7 +63,7 @@ internal class LocalSessionSearchPopup private constructor(
     private val model = DefaultListModel<LocalSessionSearchResult>()
     private val list = JBList(model).apply {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
-        cellRenderer = ResultRenderer()
+        cellRenderer = ResultRenderer(SandboxAgentSettingsState.getInstance(project))
         emptyText.text = TYPE_TO_SEARCH
     }
     private val preview = JBTextArea().apply {
@@ -203,8 +204,12 @@ internal class LocalSessionSearchPopup private constructor(
         onChoose(result)
     }
 
-    /** Icon, title and — for a backup or a deleted file — its kind and date; the match is in the preview. */
-    private class ResultRenderer : ColoredListCellRenderer<LocalSessionSearchResult>() {
+    /**
+     * The agent the session belongs to, the title, the agent's name and — for a backup or a
+     * deleted file — its kind and date; the match is in the preview. The sessions of every agent
+     * are searched together, and which agent a result belongs to decides how it opens.
+     */
+    private class ResultRenderer(private val settings: SandboxAgentSettingsState) : ColoredListCellRenderer<LocalSessionSearchResult>() {
         override fun customizeCellRenderer(
             list: JList<out LocalSessionSearchResult>,
             value: LocalSessionSearchResult,
@@ -212,8 +217,17 @@ internal class LocalSessionSearchPopup private constructor(
             selected: Boolean,
             hasFocus: Boolean,
         ) {
-            icon = LocalSessionPresentation.kindIcon(value.file.kind)
+            val owner = value.agentId ?: settings.legacyAgentIdOrDefault()
+            val enabled = settings.agentById(owner)
+            icon = SandboxAgentIcons.agentIcon(
+                enabled?.iconSvgOrNull(),
+                if (enabled == null) AgentMark.DISCONNECTED else AgentMark.NONE,
+                settings.agentColorOrNull(owner),
+            )
             append(value.title, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
+            val agentName = enabled?.nameOrDefault() ?: value.agentName ?: owner
+            append("  $agentName", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+            if (enabled == null) append(" (not enabled)", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
             if (value.file.kind != LocalSessionKind.CURRENT) {
                 append("  " + LocalSessionPresentation.readOnlyStatus(value.file), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
             }

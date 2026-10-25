@@ -13,6 +13,17 @@ data class LocalSessionSearchResult(
     val file: LocalSessionFile,
     val sessionId: String,
     val title: String,
+    /** The agent the snapshot names; `null` for one written before it was kept. */
+    val agentId: String? = null,
+    val agentName: String? = null,
+)
+
+/** What a snapshot document says about itself, read without decoding the transcript. */
+internal data class SnapshotIdentity(
+    val sessionId: String,
+    val title: String,
+    val agentId: String?,
+    val agentName: String?,
 )
 
 /**
@@ -58,18 +69,19 @@ object LocalSessionSearch {
             if (isCancelled()) return emptyList()
             val text = read(file.file) ?: continue
             if (!text.contains(needle, ignoreCase = true)) continue
-            val (sessionId, title) = identify(text, file.sanitizedId)
-            results += LocalSessionSearchResult(file, sessionId, title)
+            val identity = identify(text, file.sanitizedId)
+            results += LocalSessionSearchResult(file, identity.sessionId, identity.title, identity.agentId, identity.agentName)
         }
         return results
     }
 
-    /** `sessionId` and title of a snapshot document; the title falls back to the id. */
-    internal fun identify(text: String, fallbackId: String): Pair<String, String> {
+    /** `sessionId`, title and agent of a snapshot document; the title falls back to the id. */
+    internal fun identify(text: String, fallbackId: String): SnapshotIdentity {
         val document = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull()
+        fun string(key: String) =
+            (document?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
         val sessionId = (document?.get("sessionId") as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() } ?: fallbackId
-        val title = (document?.get("title") as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
-        return sessionId to (title ?: sessionId)
+        return SnapshotIdentity(sessionId, string("title") ?: sessionId, string("agentId"), string("agentName"))
     }
 
     /** About [radius] characters on each side of the match at [start], whitespace folded to spaces. */

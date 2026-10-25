@@ -4,6 +4,7 @@ import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -117,5 +118,19 @@ class LocalSessionIndexTest {
         assertEquals(1L, kb(1))
         assertEquals(1L, kb(1024))
         assertEquals(2L, kb(1025))
+    }
+
+    @Test
+    fun `an index without some sessions reads them as kept nowhere`() {
+        val directory = java.nio.file.Files.createTempDirectory("index-without").toFile()
+        File(directory, "a.json").writeText("{}")
+        File(directory, "b.json").writeText("{}")
+        val index = LocalSessionIndex.scan(directory)
+
+        val filtered = index.without(setOf("a"))
+
+        assertEquals(StorageState.REMOTE_ONLY, filtered.storageState("a"))
+        assertEquals(StorageState.LOCAL, filtered.storageState("b"))
+        assertSame(index, index.without(emptySet()))
     }
 }

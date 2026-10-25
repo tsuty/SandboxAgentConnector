@@ -441,4 +441,18 @@ class SessionSnapshotStoreTest {
         assertEquals("Gemini CLI", replaced.agentName)
         assertNotNull(replaced.savedAt)
     }
+
+    @Test
+    fun `the owner of a current snapshot follows its rewrites`() {
+        val (store, directory) = tempStore()
+        assertNull(store.ownerOf("sess_1", "claude-acp"))
+        store.save("sess_1", listOf(UserMessageEntry("hi")), agent = gemini)
+        assertEquals("gemini", store.ownerOf("sess_1", "claude-acp"))
+
+        // Rewritten by a version that does not know the owner: the legacy agent's again.
+        val file = File(directory, "sess_1.json")
+        file.writeText("""{"schemaVersion":1,"sessionId":"sess_1","entries":[]}""")
+        file.setLastModified(file.lastModified() + 10_000)
+        assertEquals("claude-acp", store.ownerOf("sess_1", "claude-acp"))
+    }
 }

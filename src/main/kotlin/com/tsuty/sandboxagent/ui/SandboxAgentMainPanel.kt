@@ -1,5 +1,9 @@
 package com.tsuty.sandboxagent.ui
 
+import com.tsuty.sandboxagent.session.LocalSessionKind
+import com.tsuty.sandboxagent.settings.SandboxAgentSettingsConfigurable
+import com.intellij.openapi.options.ShowSettingsUtil
+import com.intellij.ui.components.ActionLink
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
@@ -90,6 +94,14 @@ class SandboxAgentMainPanel(
     }
 
     /** Toolbar, right of [statusLabel]: transient messages ("Creating session…", errors). */
+    /**
+     * Shown in a Read Only tab of an agent that is not enabled: the settings are where it is
+     * enabled again. The tab stays read only — a session is only ever started in a new tab.
+     */
+    private val enableAgentLink = ActionLink("Enable in Settings") {
+        ShowSettingsUtil.getInstance().showSettingsDialog(project, SandboxAgentSettingsConfigurable::class.java)
+    }.apply { isVisible = false }
+
     private val messageLabel = JBLabel().apply {
         font = JBUI.Fonts.smallFont()
         foreground = UIUtil.getContextHelpForeground()
@@ -242,6 +254,7 @@ class SandboxAgentMainPanel(
         val labels = GridBagConstraints().apply { anchor = GridBagConstraints.WEST }
         left.add(statusLabel, labels)
         left.add(messageLabel, labels.apply { insets = JBUI.insetsLeft(ACTION_BAR_GAP * 2) })
+        left.add(enableAgentLink, labels)
 
         val right = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(ACTION_BAR_GAP), 0))
         right.isOpaque = false
@@ -661,7 +674,13 @@ class SandboxAgentMainPanel(
         if (source != null) {
             // Nothing ever connects here: the status names the file the transcript comes from.
             statusLabel.icon = null
-            statusLabel.text = LocalSessionPresentation.readOnlyStatus(source.file)
+            val agentNotEnabled = source.file.kind == LocalSessionKind.CURRENT
+            statusLabel.text = if (agentNotEnabled) {
+                LocalSessionPresentation.agentNotEnabledStatus(service.agentName())
+            } else {
+                LocalSessionPresentation.readOnlyStatus(source.file)
+            }
+            enableAgentLink.isVisible = agentNotEnabled
             messageLabel.icon = null
             messageLabel.text = ""
             return

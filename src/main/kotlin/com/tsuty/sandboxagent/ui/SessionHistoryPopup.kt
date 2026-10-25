@@ -244,8 +244,10 @@ object SessionHistoryPopup {
         service.refreshSessions()
         val entries = service.sessions.sortedByDescending { it.lastUpdatedMillis ?: 0 }
         // One listing of the directory for the whole popup, not one lookup per row.
+        // A session whose local files belong to another agent reads as kept nowhere here.
         val index = runCatching { SessionSnapshotStore.forProject(project).index() }
             .getOrDefault(LocalSessionIndex.EMPTY)
+            .without(service.foreignSessionIds)
         val step = SessionHistoryPopupStep(
             entries,
             onSelect = { service.selectSession(it) },

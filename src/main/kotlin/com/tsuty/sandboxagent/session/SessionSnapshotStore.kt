@@ -408,6 +408,25 @@ class SessionSnapshotStore(
         return target
     }
 
+    /** `agentId` of the current snapshot of a path, by the modification time it was read at. */
+    private val ownerCache = ConcurrentHashMap<String, Pair<Long, String?>>()
+
+    /**
+     * The agent owning the current snapshot of [sessionId] (see [SessionSnapshot.ownerAgentId]);
+     * `null` without a readable one. The session list asks this for every row after every turn,
+     * so the answer is kept for as long as the file is not written again.
+     */
+    @Synchronized
+    fun ownerOf(sessionId: String, legacyAgentId: String): String? {
+        val file = fileOf(sessionId)
+        if (!file.isFile) return null
+        val stamp = file.lastModified()
+        ownerCache[file.path]?.takeIf { it.first == stamp }?.let { return it.second ?: legacyAgentId }
+        val snapshot = read(file) ?: return null
+        ownerCache[file.path] = stamp to snapshot.agentId
+        return snapshot.ownerAgentId(legacyAgentId)
+    }
+
     /** Lists the directory once; see [LocalSessionIndex]. */
     @Synchronized
     fun index(): LocalSessionIndex = LocalSessionIndex.scan(directory)

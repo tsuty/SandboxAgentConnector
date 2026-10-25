@@ -191,29 +191,36 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
     }
 
     /**
-     * A current snapshot is entered like a pick of the session list, in the active tab when it is
-     * connected and otherwise in a new tab once that one has its session (see [restoreInNewTab]);
-     * a backup or a deleted file opens in a Read Only tab.
+     * A current snapshot is entered with the agent it belongs to, like a pick of the session list:
+     * in the active tab when that one runs this agent and is connected, otherwise in a new tab of
+     * that agent once it has its session (see [restoreInNewTab]). A backup, a deleted file and
+     * the snapshot of an agent that is not enabled open in a Read Only tab.
      */
     private fun openSearchResult(result: LocalSessionSearchResult) {
         if (result.file.kind != LocalSessionKind.CURRENT) {
             openReadOnlyTab(result.file)
             return
         }
+        val settings = SandboxAgentSettingsState.getInstance(project)
+        val owner = result.agentId ?: settings.legacyAgentIdOrDefault()
+        if (!settings.isEnabled(owner)) {
+            openReadOnlyTab(result.file)
+            return
+        }
         val service = selectedTab?.service
-        if (service != null && !service.isReadOnly && service.state == SessionState.READY) {
+        if (service != null && !service.isReadOnly && service.agentId == owner && service.state == SessionState.READY) {
             service.selectSession(entryFor(service, result))
             return
         }
-        restoreInNewTab(result)
+        restoreInNewTab(result.sessionId, result.title, owner)
     }
 
     /**
      * The restore waits for [SandboxAgentEvent.SessionEstablished]: a tab creates its own session
      * right after connecting, and entering another one before that finished would race it.
      */
-    private fun restoreInNewTab(result: LocalSessionSearchResult) {
-        val tab = addTab()
+    private fun restoreInNewTab(sessionId: String, title: String, agentId: String) {
+        val tab = addTab(agentId)
         if (tab == null) {
             notify(TAB_LIMIT_MESSAGE)
             return
@@ -223,7 +230,7 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         listener = SandboxAgentEventListener { event ->
             val done = when (event) {
                 is SandboxAgentEvent.SessionEstablished -> {
-                    service.selectSession(entryFor(service, result))
+                    service.selectSession(entryFor(service, sessionId, title))
                     true
                 }
                 is SandboxAgentEvent.StateChanged ->
@@ -236,11 +243,15 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
     }
 
     private fun entryFor(service: SandboxAgentService, result: LocalSessionSearchResult): SessionListEntry =
-        service.sessions.firstOrNull { it.sessionId == result.sessionId }
-            ?: SessionListEntry(sessionId = result.sessionId, title = result.title)
+        entryFor(service, result.sessionId, result.title)
+
+    private fun entryFor(service: SandboxAgentService, sessionId: String, title: String): SessionListEntry =
+        service.sessions.firstOrNull { it.sessionId == sessionId }
+            ?: SessionListEntry(sessionId = sessionId, title = title)
 
     /**
-     * Opens [file] — a backup or a deleted snapshot — in a Read Only tab, which never connects and
+     * Opens [file] — a backup, a deleted snapshot or the snapshot of an agent that is not enabled —
+     * in a Read Only tab, which never connects and
      * counts towards the same [TabsController.MAX_TABS] as every other tab. The file is read off
      * the EDT; a file that cannot be read and a full strip are reported instead of opened.
      */

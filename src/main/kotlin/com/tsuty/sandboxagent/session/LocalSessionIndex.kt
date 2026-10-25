@@ -75,6 +75,16 @@ class LocalSessionIndex(val bySanitizedId: Map<String, LocalSessionFiles>) {
         return files.current == null && files.deleted.isNotEmpty()
     }
 
+    /**
+     * This index without the files of [sessionIds]: the session list of an agent shows a session
+     * whose local files belong to another agent as kept nowhere (see `SessionSnapshotStore.ownerOf`).
+     */
+    fun without(sessionIds: Set<String>): LocalSessionIndex {
+        if (sessionIds.isEmpty()) return this
+        val excluded = sessionIds.map { SessionSnapshotStore.sanitize(it) }.toSet()
+        return LocalSessionIndex(bySanitizedId.filterKeys { it !in excluded })
+    }
+
     /** The files the local session search reads: current snapshots and backups, deleted ones on request. */
     fun searchable(includeDeleted: Boolean): List<LocalSessionFile> =
         bySanitizedId.values.flatMap { files ->
