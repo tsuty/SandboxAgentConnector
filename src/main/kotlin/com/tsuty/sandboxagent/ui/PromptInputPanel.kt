@@ -11,9 +11,13 @@ import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.editor.SpellCheckingEditorCustomizationProvider
+import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.ex.EditorEx
+import com.intellij.openapi.editor.markup.HighlighterLayer
+import com.intellij.openapi.editor.markup.HighlighterTargetArea
+import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
 import com.intellij.ui.EditorTextField
@@ -23,6 +27,7 @@ import com.intellij.util.ui.JBUI
 import com.tsuty.sandboxagent.acp.AvailableCommand
 import com.tsuty.sandboxagent.actions.InsertNewlineAction
 import com.tsuty.sandboxagent.actions.SendPromptAction
+import org.intellij.plugins.markdown.highlighting.MarkdownHighlighterColors
 import org.intellij.plugins.markdown.lang.MarkdownFileType
 import java.awt.BasicStroke
 import java.awt.Color
@@ -46,9 +51,13 @@ import javax.swing.border.Border
  * Prompt editor with 2..8 line auto grow, a configurable submit shortcut and IME awareness.
  *
  * The document is a Markdown one, which buys two things from the platform for free: the Markdown
- * lexer highlights what the user types (`**bold**`, `` `code` ``, `~~strike~~`, headers, links) and
+ * lexer highlights the block syntax the user types (fences, `#`, `>`, list markers) and
  * `MarkdownCompletionContributor` completes the language of a fenced code block. Both are what the
  * prompt is eventually sent as anyway, so the field now reads like the transcript it produces.
+ *
+ * The inline styles (`` `code` ``, `**bold**`, `~~strike~~`, header text, links) come from the
+ * Markdown plugin's annotator instead, which only runs with the daemon, and the daemon does not
+ * reliably run on this field. They are painted here instead, see [applyMarkdownStyles].
  */
 class PromptInputPanel(
     private val project: Project,
@@ -65,6 +74,11 @@ class PromptInputPanel(
     private var availableCommands: List<AvailableCommand> = emptyList()
     private var slashPopup: SlashCommandPopup? = null
 
+    /** The editor [markdownHighlighters] were added to; EditorTextField recreates its editor. */
+    private var styledEditor: EditorEx? = null
+    private var markdownHighlighters: List<RangeHighlighter> = emptyList()
+    private var markdownStylesPending = false
+
     init {
         setPlaceholder(DEFAULT_PLACEHOLDER)
         border = JBUI.Borders.empty()
@@ -74,6 +88,7 @@ class PromptInputPanel(
                 revalidate()
                 repaint()
                 scheduleSlashPopupUpdate()
+                scheduleMarkdownStylesUpdate()
             }
         })
         // The field is created without a document, and EditorTextField only starts forwarding
@@ -125,6 +140,8 @@ class PromptInputPanel(
         installSubmitShortcut(editor)
         installSlashCommandShortcuts(editor)
         installImeGuard(editor.contentComponent)
+        // A recreated editor starts with an empty markup model, so the styles are painted again.
+        applyMarkdownStyles(editor)
         return editor
     }
 
@@ -272,6 +289,69 @@ class PromptInputPanel(
 
     private fun hideSlashPopup() {
         slashPopup?.hide()
+    }
+
+    /**
+     * Repaints the inline Markdown styles once the current EDT event is done, so a burst of
+     * document changes (a paste, [clearInput]) parses the prompt only once.
+     */
+    private fun scheduleMarkdownStylesUpdate() {
+        if (markdownStylesPending) return
+        markdownStylesPending = true
+        ApplicationManager.getApplication().invokeLater(
+            {
+                markdownStylesPending = false
+                (editor as? EditorEx)?.takeUnless { it.isDisposed }?.let { applyMarkdownStyles(it) }
+            },
+            ModalityState.stateForComponent(this),
+            project.disposed,
+        )
+    }
+
+    /**
+     * Paints what `MarkdownHighlightingAnnotator` would, without waiting for the daemon (see
+     * [PromptMarkdownHighlighting]). The color scheme keys are the Markdown plugin's own, so the
+     * field follows `Settings > Editor > Color Scheme > Markdown`; when the daemon does run, its
+     * highlights land on the same ranges with the same keys and change nothing.
+     */
+    private fun applyMarkdownStyles(editor: EditorEx) {
+        val markup = editor.markupModel
+        if (styledEditor === editor) markdownHighlighters.forEach { markup.removeHighlighter(it) }
+        styledEditor = editor
+        markdownHighlighters = PromptMarkdownHighlighting.spans(editor.document.text).map { span ->
+            markup.addRangeHighlighter(
+                attributesKeyOf(span.style),
+                span.start,
+                span.end,
+                // Inner elements (and the markers of an element) are painted over the outer ones.
+                HighlighterLayer.ADDITIONAL_SYNTAX + span.depth,
+                HighlighterTargetArea.EXACT_RANGE,
+            )
+        }
+    }
+
+    private fun attributesKeyOf(style: PromptMarkdownHighlighting.Style): TextAttributesKey = when (style) {
+        PromptMarkdownHighlighting.Style.CODE_SPAN -> MarkdownHighlighterColors.CODE_SPAN
+        PromptMarkdownHighlighting.Style.CODE_SPAN_MARKER -> MarkdownHighlighterColors.CODE_SPAN_MARKER
+        PromptMarkdownHighlighting.Style.BOLD -> MarkdownHighlighterColors.BOLD
+        PromptMarkdownHighlighting.Style.BOLD_MARKER -> MarkdownHighlighterColors.BOLD_MARKER
+        PromptMarkdownHighlighting.Style.ITALIC -> MarkdownHighlighterColors.ITALIC
+        PromptMarkdownHighlighting.Style.ITALIC_MARKER -> MarkdownHighlighterColors.ITALIC_MARKER
+        PromptMarkdownHighlighting.Style.STRIKE_THROUGH -> MarkdownHighlighterColors.STRIKE_THROUGH
+        PromptMarkdownHighlighting.Style.HEADER_LEVEL_1 -> MarkdownHighlighterColors.HEADER_LEVEL_1
+        PromptMarkdownHighlighting.Style.HEADER_LEVEL_2 -> MarkdownHighlighterColors.HEADER_LEVEL_2
+        PromptMarkdownHighlighting.Style.HEADER_LEVEL_3 -> MarkdownHighlighterColors.HEADER_LEVEL_3
+        PromptMarkdownHighlighting.Style.HEADER_LEVEL_4 -> MarkdownHighlighterColors.HEADER_LEVEL_4
+        PromptMarkdownHighlighting.Style.HEADER_LEVEL_5 -> MarkdownHighlighterColors.HEADER_LEVEL_5
+        PromptMarkdownHighlighting.Style.HEADER_LEVEL_6 -> MarkdownHighlighterColors.HEADER_LEVEL_6
+        PromptMarkdownHighlighting.Style.EXPLICIT_LINK -> MarkdownHighlighterColors.EXPLICIT_LINK
+        PromptMarkdownHighlighting.Style.REFERENCE_LINK -> MarkdownHighlighterColors.REFERENCE_LINK
+        PromptMarkdownHighlighting.Style.IMAGE -> MarkdownHighlighterColors.IMAGE
+        PromptMarkdownHighlighting.Style.LINK_TEXT -> MarkdownHighlighterColors.LINK_TEXT
+        PromptMarkdownHighlighting.Style.LINK_LABEL -> MarkdownHighlighterColors.LINK_LABEL
+        PromptMarkdownHighlighting.Style.LINK_DESTINATION -> MarkdownHighlighterColors.LINK_DESTINATION
+        PromptMarkdownHighlighting.Style.LINK_TITLE -> MarkdownHighlighterColors.LINK_TITLE
+        PromptMarkdownHighlighting.Style.BLOCK_QUOTE -> MarkdownHighlighterColors.BLOCK_QUOTE
     }
 
     /** The whole prompt is the command token being completed, so it is rewritten as a whole. */
