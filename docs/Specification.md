@@ -175,7 +175,7 @@ To prevent sensitive information from being unintentionally transmitted to exter
 * **Interruption**: During turn execution, the `Send` button switches to `Stop`, sending `session/cancel` upon click (not a separate button).
 * **Prompt Input Area (Key UX Requirements)**:
   * **Dynamic Height Adjustment**:
-    * **Splitter Component (`JBSplitter`)**: Users can manually adjust and expand the area height by dragging the divider between the chat log and input area.
+    * **Splitter Component (`JBSplitter`)**: Users can manually adjust and expand the area height by dragging the divider between the chat log and input area. The divider (`PromptSplitter`) draws a faint hairline across it so it can be found, thickens it to 2px in the full accent color while hovered or dragged, and double-clicking it restores the default 70/30 split.
     * **Auto-Grow**: Automatically expands vertically from a minimum of ~2 lines to a maximum of ~8 lines based on input length, transitioning to internal scrolling beyond the limit.
   * **Input Component**: Uses `EditorTextField`, supporting syntax highlighting, code completion, and native JetBrains shortcuts.
   * **Send / Newline Keymaps**:

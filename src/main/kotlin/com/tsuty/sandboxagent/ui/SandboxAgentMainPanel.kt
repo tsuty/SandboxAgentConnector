@@ -8,7 +8,6 @@ import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.AnimatedIcon
-import com.intellij.ui.JBSplitter
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
@@ -179,8 +178,7 @@ class SandboxAgentMainPanel(
         if (readOnly) {
             add(chatLog, BorderLayout.CENTER)
         } else {
-            val splitter = JBSplitter(true, "SandboxAgentConnector.splitter", 0.7f)
-            SandboxAgentColors.paintPanelBackground(splitter)
+            val splitter = PromptSplitter(0.7f)
             splitter.firstComponent = chatLog
             splitter.secondComponent = bottomPanel()
             add(splitter, BorderLayout.CENTER)
