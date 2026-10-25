@@ -19,8 +19,18 @@ class AgentWritingAccessProvider(private val project: Project) : WritingAccessPr
     override fun requestWriting(files: Collection<VirtualFile>): Collection<VirtualFile> =
         files.filter { isBlocked(it) }
 
+    /** Names the agents running a turn: with several tabs, any of them may be the one locking. */
     override fun getReadOnlyMessage(): String =
-        "The sandbox agent is running a turn: the workspace is read-only until it finishes."
+        readOnlyMessage(AgentWorkspaceGuard.getInstanceOrNull(project)?.runningAgentNames.orEmpty())
+
+    companion object {
+        fun readOnlyMessage(agentNames: List<String>): String = when (agentNames.filter { it.isNotBlank() }.size) {
+            0 -> "The sandbox agent is running a turn: the workspace is read-only until it finishes."
+            1 -> "${agentNames.first { it.isNotBlank() }} is running a turn: the workspace is read-only until it finishes."
+            else -> "${agentNames.filter { it.isNotBlank() }.joinToString(", ")} are running turns: " +
+                "the workspace is read-only until they finish."
+        }
+    }
 
     private fun isBlocked(file: VirtualFile): Boolean =
         AgentWorkspaceGuard.getInstanceOrNull(project)?.isEditingBlocked(file) == true

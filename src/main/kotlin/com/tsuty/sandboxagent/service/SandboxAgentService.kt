@@ -1288,7 +1288,7 @@ class SandboxAgentService(
         publish(SandboxAgentEvent.UserPrompt(prompt, context.map { it.toAttachment() }))
         // The agent edits the workspace from the sandbox: the IDE flushes its buffers and locks
         // the editors for the turn, so a local edit cannot race those writes.
-        workspaceGuard()?.turnStarted(this)
+        workspaceGuard()?.turnStarted(this, agentName())
         turnRunningRef.set(true)
         publish(SandboxAgentEvent.TurnStarted)
         try {

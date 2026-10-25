@@ -8,7 +8,6 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Keeps the IDE in sync with the files the agent edits inside the sandbox, and keeps the user out
@@ -38,13 +37,18 @@ class AgentWorkspaceGuard(private val project: Project) {
     val isTurnRunning: Boolean
         get() = turns.isAnyRunning
 
+    /** Names of the agents running a turn right now, each once, in the order they started. */
+    val runningAgentNames: List<String>
+        get() = turns.runningAgentNames
+
     /**
-     * Flushes the unsaved documents and locks the workspace for the turn of [owner]. The lock is
-     * skipped when the user turned it off in the settings; the flush is not, because the agent
+     * Flushes the unsaved documents and locks the workspace for the turn of [owner], whose agent
+     * is [agentName] (named by the read-only message, see [AgentWritingAccessProvider]). The lock
+     * is skipped when the user turned it off in the settings; the flush is not, because the agent
      * would otherwise read a stale file.
      */
-    fun turnStarted(owner: Any) {
-        if (!turns.start(owner)) return
+    fun turnStarted(owner: Any, agentName: String) {
+        if (!turns.start(owner, agentName)) return
         saveDocuments()
     }
 
@@ -127,16 +131,27 @@ class AgentWorkspaceGuard(private val project: Project) {
 
 /** The owners (one per tab session) whose turn is running; kept free of the IDE so it can be unit tested. */
 class AgentTurns {
-    private val owners = ConcurrentHashMap.newKeySet<Any>()
+    /** Running turns by owner, with the name of the agent running each; in the order they started. */
+    private val owners = LinkedHashMap<Any, String>()
 
     val isAnyRunning: Boolean
-        get() = owners.isNotEmpty()
+        @Synchronized get() = owners.isNotEmpty()
+
+    /** Names of the agents running a turn, each once: two tabs of one agent read as that agent. */
+    val runningAgentNames: List<String>
+        @Synchronized get() = owners.values.distinct()
 
     /** `false` when the turn of [owner] was already running. */
-    fun start(owner: Any): Boolean = owners.add(owner)
+    @Synchronized
+    fun start(owner: Any, agentName: String = ""): Boolean {
+        if (owner in owners) return false
+        owners[owner] = agentName
+        return true
+    }
 
     /** `false` when [owner] had no running turn. */
-    fun finish(owner: Any): Boolean = owners.remove(owner)
+    @Synchronized
+    fun finish(owner: Any): Boolean = owners.remove(owner) != null
 }
 
 /** Path arithmetic of the guard, kept free of the IDE so it can be unit tested. */
