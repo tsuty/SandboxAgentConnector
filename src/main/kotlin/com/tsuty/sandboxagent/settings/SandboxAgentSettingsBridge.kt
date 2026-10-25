@@ -6,12 +6,12 @@ import com.intellij.util.messages.Topic
 import com.tsuty.sandboxagent.service.SandboxAgentService
 
 /**
- * Pushes the persisted settings into the sandbox layer by assigning
- * [SandboxAgentService.config]. Applied when the service starts and whenever the
- * settings dialog is applied.
+ * Tells the UI that the settings of a project were applied.
  *
- * Settings the UI reads instead of the sandbox (the transcript font size is one) are not pushed
- * anywhere: [TOPIC] only says that they changed, and whoever renders them reads them again.
+ * Nothing is pushed into the sandbox layer: every tab runs its own [SandboxAgentService], and each
+ * one reads the settings of its agent again when it connects. [TOPIC] only says that they
+ * changed, and whoever renders them (the drawing of an agent, the transcript font size, ...)
+ * reads them again.
  */
 object SandboxAgentSettingsBridge {
 
@@ -25,9 +25,6 @@ object SandboxAgentSettingsBridge {
 
     fun apply(project: Project) {
         if (project.isDisposed) return
-        project.getServiceIfCreated(SandboxAgentService::class.java)?.let { service ->
-            service.config = SandboxAgentSettingsState.getInstance(project).toSandboxConfig()
-        }
         project.messageBus.syncPublisher(TOPIC).settingsApplied()
     }
 

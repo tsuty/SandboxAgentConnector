@@ -226,7 +226,7 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
 
     private fun addReadOnlyTab(source: ReadOnlySource) {
         // The limit is checked again: another tab may have been opened while the file was read.
-        val tab = controller.addTab(SandboxAgentService(project, source))
+        val tab = controller.addTab(SandboxAgentService(project, agentId = null, readOnlySource = source))
         if (tab == null) {
             notify(TAB_LIMIT_MESSAGE)
             return
@@ -406,7 +406,7 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
          * The agent of this tab, carrying whatever its state asks to be marked (see [mark] and
          * [SandboxAgentIcons.agentIcon]), pulsing while its turn runs (see [pulse]), and the way to
          * attach it again (see [attach]). The drawing is the one the selected ACP registry entry
-         * ships (`SandboxAgentSettingsState.agentIconSvg`) and the bundled one when there is none.
+         * ships (`AgentEntry.iconSvg`) and the bundled one when there is none.
          *
          * Unlike the title, this one carries its own mouse listener: a tooltip alone already stops
          * the events from reaching the chip (the tooltip manager listens on the component it is
@@ -745,10 +745,11 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
             repaint()
         }
 
-        /** The agent icon carrying [mark], drawn with whatever the selected agent brought along. */
+        /** The agent icon carrying [mark], drawn with whatever the agent of this tab brought along. */
         private fun agentIcon(mark: AgentMark): Icon {
             val settings = SandboxAgentSettingsState.getInstance(project)
-            return SandboxAgentIcons.agentIcon(settings.agentIconSvgOrNull(), mark, settings.agentColorOrNull())
+            val agent = tab.service.agent()
+            return SandboxAgentIcons.agentIcon(agent?.iconSvgOrNull(), mark, agent?.let { settings.agentColorOrNull(it.id) })
         }
 
         private fun elide(text: String): String =

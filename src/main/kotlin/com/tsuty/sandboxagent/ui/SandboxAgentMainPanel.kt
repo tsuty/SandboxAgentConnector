@@ -67,7 +67,7 @@ class SandboxAgentMainPanel(
     private val readOnly = service.isReadOnly
 
     // Choices the agent offers as a Markdown task list are answered straight from the transcript.
-    private val chatLog = TranscriptPanel(project) { submitPrompt(it) }
+    private val chatLog = TranscriptPanel(project, agent = { service.agent() }) { submitPrompt(it) }
     private val chips = ContextChipsPanel(project)
     private val promptInput = PromptInputPanel(project) { submitPrompt(it) }
 

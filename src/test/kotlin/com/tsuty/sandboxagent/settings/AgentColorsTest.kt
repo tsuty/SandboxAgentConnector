@@ -40,12 +40,11 @@ class AgentColorsTest {
     }
 
     @Test
-    fun `the selected agent of the settings is resolved`() {
-        val settings = SandboxAgentSettingsState().apply { agentId = "gemini" }
-        assertEquals("#4A83F7", settings.agentColorOrNull())
+    fun `the color of an agent of the settings is resolved`() {
+        val settings = SandboxAgentSettingsState()
+        assertEquals("#4A83F7", settings.agentColorOrNull("gemini"))
         settings.agentColors["gemini"] = "#000000"
-        assertEquals("#000000", settings.agentColorOrNull())
-        settings.agentId = "some-agent"
-        assertNull(settings.agentColorOrNull())
+        assertEquals("#000000", settings.agentColorOrNull("gemini"))
+        assertNull(settings.agentColorOrNull("some-agent"))
     }
 }

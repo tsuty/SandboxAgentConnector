@@ -7,7 +7,7 @@ import com.intellij.util.io.HttpRequests
  * The drawing an ACP registry entry ships for its agent (see [CommandOption.iconUrl]).
  *
  * The file is downloaded once, when the agent is picked in the settings, and the markup itself is
- * persisted next to the command ([SandboxAgentSettingsState.agentIconSvg]): the plugin draws the
+ * persisted next to the command ([AgentEntry.iconSvg]): the plugin draws the
  * agent on every start of the IDE, and reaching the CDN for it would make the toolbar depend on
  * the network — an agent that is only ever started inside a VM does not need one.
  *

@@ -37,7 +37,7 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
     // What was actually started is written to the IDE log instead (see `SandboxProcessManager`).
     // The one exception is an agent shipped as a pre-built binary, whose command is typed here
     // because nothing else can know it (see `AgentSelector`).
-    private val agentSelector = AgentSelector().apply { onAgentChanged = { showAgentColor(it.id) } }
+    private val agentList = AgentListPanel().apply { onSelectionChanged = { showAgentColor(it.id) } }
 
     /**
      * The colors of the dialog, by agent id, until they are applied: the drop down may switch to
@@ -52,7 +52,7 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
         addActionListener {
             if (showingAgentColor) return@addActionListener
             val color = selectedColor ?: return@addActionListener
-            storeAgentColor(agentSelector.agent.id, AgentColors.toHex(color))
+            storeAgentColor(agentList.selectedAgent.id, AgentColors.toHex(color))
         }
     }
 
@@ -95,25 +95,29 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
                         "which runs <code>exec -i -t</code> with it instead of the agent.",
                 )
             }
-            row("ACP Agent:") {
-                // Not filled: the version and the update offer sit next to the drop down and are
-                // laid out from the left edge of the cell (see `AgentSelector`).
-                cell(agentSelector)
-                    .validationRequestor { agentSelector.onValidationChanged = it }
+            row("ACP Agents:") {
+                cell(agentList)
+                    .align(AlignX.FILL)
+                    .validationRequestor { agentList.onValidationChanged = it }
                     .onReset {
-                        agentSelector.setState(settings.agent())
-                        agentSelector.setAgents(AcpAgentRegistry.fallbackAgents())
+                        agentList.reset(settings)
                         loadAgentRegistry()
                     }
-                    .onIsModified { !agentSelector.agent.isSameSelection(settings.agent()) }
+                    .onIsModified { agentList.isModified(settings) }
                     // A binary agent is started with a typed command, and a command that cannot
                     // work is refused here rather than at the sandbox (see `AgentCommandValidator`).
-                    .validationOnApply { agentSelector.commandError()?.let { error(it) } }
+                    .validationOnApply { agentList.commandError()?.let { error(it) } }
                     .onApply {
-                        val agent = agentSelector.agent
-                        settings.setAgent(agent)
-                        applyAgentIcon(agent)
+                        agentList.apply(settings)
+                        downloadMissingIcons(null)
                     }
+            }
+            row {
+                comment(
+                    "Every agent of the list can be started in a tab of its own, in the same sandbox: <b>+</b> " +
+                        "of the tool window opens a tab with the checked one, and its arrow lists all of them. " +
+                        "Sessions of an agent that is removed stay readable in the IDE, but only as Read Only tabs.",
+                )
             }
             row {
                 comment(
@@ -126,7 +130,7 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
             row {
                 comment(
                     "An agent shipped as a pre-built <code>binary</code> is started with the command entered " +
-                        "below the drop down: the plugin never installs anything into the sandbox, so the " +
+                        "below the list: the plugin never installs anything into the sandbox, so the " +
                         "executable has to be there already and only its path says where. It is started as an " +
                         "argument list and not through a shell, so pipes, redirections and variables are refused " +
                         "— they would reach the agent as literal text. No update is offered for it either, the " +
@@ -138,7 +142,7 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
                     "Credentials and any other environment the agent needs (<code>ANTHROPIC_API_KEY</code> and " +
                         "the like) have to be set inside the sandbox beforehand: the plugin passes no environment " +
                         "into it. The registry entries that name environment variables of their own show them " +
-                        "next to the drop down.",
+                        "below the list.",
                 )
             }
             row("Agent startup idle timeout (s):") {
@@ -206,19 +210,19 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
                     .onReset {
                         agentColorEdits.clear()
                         agentColorEdits.putAll(settings.agentColors)
-                        showAgentColor(agentSelector.agent.id)
+                        showAgentColor(agentList.selectedAgent.id)
                     }
                     .onIsModified { agentColorEdits != settings.agentColors }
                     .onApply { settings.agentColors = LinkedHashMap(agentColorEdits) }
                 button("Reset to Default") {
-                    val agentId = agentSelector.agent.id
+                    val agentId = agentList.selectedAgent.id
                     agentColorEdits.remove(agentId)
                     showAgentColor(agentId)
                 }
             }
             row {
                 comment(
-                    "Color of the selected agent on its tabs and on the <b>Agent</b> header of the transcript, " +
+                    "Color of the agent selected in the list above on its tabs and on the <b>Agent</b> header of the transcript, " +
                         "one for every theme. Only what the drawing of the agent leaves uncolored takes it; " +
                         "the colors of a brand icon are kept. Without a color the agent is drawn as before.",
                 )
@@ -252,56 +256,39 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
     private fun selectedLoginShell(): LoginShell =
         loginShellCombo.selectedItem as? LoginShell ?: LoginShells.DEFAULT
 
-    /** The registry is fetched off the EDT; the drop down is refilled once it answers. */
+    /** The registry is fetched off the EDT; the list is refilled once it answers. */
     private fun loadAgentRegistry() {
         val application = ApplicationManager.getApplication()
         application.executeOnPooledThread {
             val agents = AcpAgentRegistry.load()
-            application.invokeLater({ if (!project.isDisposed) agentSelector.setAgents(agents) }, ModalityState.any())
-            // Fills in the drawing of the persisted agent, which an installation from before there
-            // was one does not have yet — and which is not a modification of the settings, so
-            // nothing here waits for an `Apply` that has no reason to happen.
-            agents.firstOrNull { it.id == settings.agentId }?.let { storeAgentIcon(it) }
+            application.invokeLater({ if (!project.isDisposed) agentList.setRegistry(agents) }, ModalityState.any())
+            // Fills in the drawings of the persisted agents, which an installation from before
+            // there was one does not have yet — and which is not a modification of the settings,
+            // so nothing here waits for an `Apply` that has no reason to happen.
+            onEdt { downloadMissingIcons(agents) }
         }
-    }
-
-    /** Keeps the drawing of the picked agent next to its command (see [AgentIcon]). */
-    private fun applyAgentIcon(agent: AcpAgent) {
-        if (agent.iconUrl.orEmpty() == settings.agentIconUrl && settings.agentIconSvg.isNotBlank()) return
-        settings.agentIconUrl = agent.iconUrl.orEmpty()
-        // The drawing is downloaded, so it cannot be part of applying the dialog: the icon simply
-        // appears once it is there, and the settings say so themselves (see the bridge below).
-        settings.agentIconSvg = ""
-        val url = agent.iconUrl ?: return
-        ApplicationManager.getApplication().executeOnPooledThread { downloadAgentIcon(url) }
     }
 
     /**
-     * Runs off the EDT: downloads the drawing the registry ships for [agent] when that is what is
-     * missing. Nothing the dialog shows is touched, so this cannot fight the user.
+     * Downloads the drawing of every enabled agent that has none for its icon file (see
+     * [AgentIcon]). [registry] lends the file to an agent stored before the file was kept;
+     * `null` downloads only what the stored agents name themselves. Runs on the EDT, downloads
+     * off it, and nothing the dialog shows is touched, so this cannot fight the user.
      */
-    private fun storeAgentIcon(agent: AcpAgent) {
-        val iconUrl = agent.iconUrl.orEmpty()
-        val known = settings.agentIconUrl == iconUrl && (iconUrl.isBlank() || settings.agentIconSvg.isNotBlank())
-        if (known) return
-        val svg = iconUrl.takeIf { it.isNotBlank() }?.let { AgentIcon.download(it) }.orEmpty()
-        onEdt {
-            // A selection applied in the meantime wins: this describes the agent of before it.
-            if (settings.agentId != agent.id) return@onEdt
-            settings.agentIconUrl = iconUrl
-            settings.agentIconSvg = svg
-            SandboxAgentSettingsBridge.apply(project)
-        }
-    }
-
-    /** Runs off the EDT: stores the drawing of [url] and tells the UI to draw it. */
-    private fun downloadAgentIcon(url: String) {
-        val svg = AgentIcon.download(url) ?: return
-        onEdt {
-            // The icon of an agent that is no longer the selected one is not what to draw.
-            if (settings.agentIconUrl != url) return@onEdt
-            settings.agentIconSvg = svg
-            SandboxAgentSettingsBridge.apply(project)
+    private fun downloadMissingIcons(registry: List<AcpAgent>?) {
+        settings.enabledAgents().forEach { entry ->
+            val url = entry.iconUrl.ifBlank { registry?.firstOrNull { it.id == entry.id }?.iconUrl.orEmpty() }
+            if (url.isBlank() || (url == entry.iconUrl && entry.iconSvg.isNotBlank())) return@forEach
+            ApplicationManager.getApplication().executeOnPooledThread {
+                val svg = AgentIcon.download(url) ?: return@executeOnPooledThread
+                onEdt {
+                    // The agent was removed, or now names another file, meanwhile: not its drawing.
+                    val current = settings.agentById(entry.id) ?: return@onEdt
+                    if (current.iconUrl.isNotBlank() && current.iconUrl != url) return@onEdt
+                    settings.updateAgentIcon(entry.id, url, svg)
+                    SandboxAgentSettingsBridge.apply(project)
+                }
+            }
         }
     }
 

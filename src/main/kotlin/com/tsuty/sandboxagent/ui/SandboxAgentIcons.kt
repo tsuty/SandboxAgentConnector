@@ -100,7 +100,7 @@ object SandboxAgentIcons {
     val NewSession: Icon = loadOrFallback("/icons/newSession.svg", AllIcons.General.Add)
 
     /**
-     * The drawing the selected agent brought along (`SandboxAgentSettingsState.agentIconSvg`), as a
+     * The drawing the selected agent brought along (`AgentEntry.iconSvg`), as a
      * Swing icon; `null` whenever there is none — or whenever it does not render, which is what
      * makes the bundled icons the default.
      *

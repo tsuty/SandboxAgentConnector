@@ -70,6 +70,7 @@ import com.tsuty.sandboxagent.session.SessionSnapshotStore
 import com.tsuty.sandboxagent.session.SessionTranscriptRecorder
 import com.tsuty.sandboxagent.session.SnapshotAgent
 import com.tsuty.sandboxagent.session.TranscriptEntry
+import com.tsuty.sandboxagent.settings.AgentEntry
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
 import com.tsuty.sandboxagent.vfs.AgentWorkspaceGuard
 import kotlinx.coroutines.CompletableDeferred
@@ -339,14 +340,59 @@ data class ReadOnlySource(val file: LocalSessionFile, val snapshot: SessionSnaps
 class SandboxAgentService(
     private val project: Project,
     /**
+     * Registry id of the agent this tab runs, fixed for the life of the tab; `null` runs the
+     * default agent of the settings. Ignored for a Read Only tab, whose agent is the owner of
+     * its snapshot.
+     */
+    agentId: String?,
+    /**
      * Set for the service of a Read Only tab: such a service never connects, never takes a lock
      * and only redraws [ReadOnlySource.snapshot] (see [openReadOnly]).
      */
     val readOnlySource: ReadOnlySource?,
 ) : Disposable {
-    constructor(project: Project) : this(project, null)
+    constructor(project: Project) : this(project, null, null)
 
     private val log = Logger.getInstance(SandboxAgentService::class.java)
+
+    /**
+     * The agent of this tab as it was when the tab opened. It is what the tab keeps running when
+     * the agent is taken out of the settings meanwhile (see [agent]); `null` without settings
+     * (light tests).
+     */
+    private val pinnedAgent: AgentEntry? = runCatching {
+        val settings = SandboxAgentSettingsState.getInstance(project)
+        if (readOnlySource != null) {
+            val owner = readOnlySource.snapshot.ownerAgentId(settings.legacyAgentIdOrDefault())
+            settings.agentById(owner)?.copy()
+                ?: AgentEntry(id = owner, name = readOnlySource.snapshot.agentName.orEmpty())
+        } else {
+            (agentId?.let { settings.agentById(it) } ?: settings.defaultAgent()).copy()
+        }
+    }.getOrNull()
+
+    /** Registry id of the agent of this tab; `null` without settings (light tests). */
+    val agentId: String?
+        get() = pinnedAgent?.id
+
+    /**
+     * The agent of this tab: its current entry of the settings, which follows a newer version or
+     * a drawing downloaded later, or the entry it was opened with once it is no longer enabled.
+     */
+    fun agent(): AgentEntry? {
+        val pinned = pinnedAgent ?: return null
+        return settingsOrNull()?.agentById(pinned.id) ?: pinned
+    }
+
+    /** Name shown for the agent of this tab. */
+    fun agentName(): String = agent()?.nameOrDefault() ?: AgentEntry.DEFAULT_AGENT_NAME
+
+    /** `true` while the agent of this tab is enabled in the settings. */
+    val isAgentEnabled: Boolean
+        get() {
+            val id = agentId ?: return true
+            return settingsOrNull()?.isEnabled(id) ?: true
+        }
 
     /** Owns every background operation of the session; cancelled together with the service. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("SandboxAgentService"))
@@ -1106,10 +1152,11 @@ class SandboxAgentService(
     }
 
     /** The agent the snapshots of this tab are written for; `null` without settings (light tests). */
-    private fun snapshotAgent(): SnapshotAgent? = runCatching {
-        val settings = SandboxAgentSettingsState.getInstance(project)
-        SnapshotAgent(settings.agent().id, settings.agentNameOrDefault(), settings.legacyAgentIdOrDefault())
-    }.getOrNull()
+    private fun snapshotAgent(): SnapshotAgent? {
+        val agent = agent() ?: return null
+        val settings = settingsOrNull() ?: return null
+        return SnapshotAgent(agent.id, agent.nameOrDefault(), settings.legacyAgentIdOrDefault())
+    }
 
     /**
      * The agent owning the local files of [sessionId] when that is not the agent of this tab (see
@@ -1604,9 +1651,14 @@ class SandboxAgentService(
     }
 
     /** Reads the persisted settings; `null` when the project service is unavailable (light tests). */
-    private fun persistedConfig(): SandboxConfig? = runCatching {
-        SandboxAgentSettingsState.getInstance(project).toSandboxConfig()
-    }.getOrNull()
+    private fun persistedConfig(): SandboxConfig? {
+        val settings = settingsOrNull() ?: return null
+        val agent = agent() ?: return null
+        return settings.toSandboxConfig(agent.agent())
+    }
+
+    private fun settingsOrNull(): SandboxAgentSettingsState? =
+        runCatching { SandboxAgentSettingsState.getInstance(project) }.getOrNull()
 
     /** `null` when the project service is unavailable (light tests), which disables rename/touch. */
     private fun metadataStore(): SessionMetadataStore? =

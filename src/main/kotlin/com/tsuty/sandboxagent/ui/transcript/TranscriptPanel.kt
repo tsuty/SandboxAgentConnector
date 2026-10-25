@@ -23,6 +23,7 @@ import com.tsuty.sandboxagent.acp.ToolKind
 import com.tsuty.sandboxagent.acp.key
 import com.tsuty.sandboxagent.service.PermissionRequest
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsBridge
+import com.tsuty.sandboxagent.settings.AgentEntry
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
 import com.tsuty.sandboxagent.ui.PromptAttachmentNavigation
 import com.tsuty.sandboxagent.ui.SandboxAgentColors
@@ -48,6 +49,8 @@ import javax.swing.JPanel
  */
 class TranscriptPanel(
     private val project: Project,
+    /** The agent of the tab, whose name and drawing head its blocks; `null` uses the bundled ones. */
+    private val agent: () -> AgentEntry? = { null },
     private val onSubmitPrompt: (String) -> Boolean = { false },
 ) : JPanel(BorderLayout()), Disposable {
 
@@ -142,15 +145,16 @@ class TranscriptPanel(
     }
 
     /**
-     * Name and drawing of the selected agent, which is what its blocks are headed with. A drawing
-     * that cannot be turned into a `<symbol>` is simply not sent, and the bundled one stays.
+     * Name and drawing of the agent of the tab, which is what its blocks are headed with. A
+     * drawing that cannot be turned into a `<symbol>` is simply not sent, and the bundled one stays.
      */
     private fun postAgent() {
         val settings = SandboxAgentSettingsState.getInstance(project)
-        val svg = settings.agentIconSvgOrNull()
-        val color = settings.agentColorOrNull()
+        val entry = agent()
+        val svg = entry?.iconSvgOrNull()
+        val color = entry?.let { settings.agentColorOrNull(it.id) }
         val symbol = svg?.let { runCatching { TranscriptIcons.agentSymbol(it, color) }.getOrNull() }
-        view.post(AgentEvent(name = settings.agentNameOrDefault(), iconSymbol = symbol))
+        view.post(AgentEvent(name = entry?.nameOrDefault() ?: AgentEntry.DEFAULT_AGENT_NAME, iconSymbol = symbol))
     }
 
     /**

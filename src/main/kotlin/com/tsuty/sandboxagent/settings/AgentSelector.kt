@@ -37,8 +37,12 @@ import javax.swing.event.DocumentEvent
  *
  * The drop down, the version it pins and the update offered for it read as one line, and the drop
  * down starts at x = 0 of the panel so that it lines up with every other editor of the dialog.
+ *
+ * With [selectable] `= false` the drop down is replaced by the name of the agent: the agent list of
+ * the settings edits one enabled agent with it (see [AgentListPanel]), and swapping that agent for
+ * another one would be a remove and an add, which the list does itself.
  */
-class AgentSelector : JPanel(VerticalLayout(VERTICAL_GAP)) {
+class AgentSelector(private val selectable: Boolean = true) : JPanel(VerticalLayout(VERTICAL_GAP)) {
 
     /** Guards the listeners while the model is repopulated or the state is pushed in. */
     private var updating = false
@@ -74,6 +78,9 @@ class AgentSelector : JPanel(VerticalLayout(VERTICAL_GAP)) {
         }
     }
 
+    /** Stands in for the drop down when the agent cannot be swapped (see [selectable]). */
+    private val nameLabel = JBLabel()
+
     private val versionLabel = JBLabel().apply {
         componentStyle = UIUtil.ComponentStyle.SMALL
         fontColor = UIUtil.FontColor.BRIGHTER
@@ -106,7 +113,7 @@ class AgentSelector : JPanel(VerticalLayout(VERTICAL_GAP)) {
     /** The drop down with its version and update offer, laid out as the one line they read as. */
     private val header = JPanel(HorizontalLayout(HORIZONTAL_GAP, SwingConstants.CENTER)).apply {
         isOpaque = false
-        add(combo)
+        add(if (selectable) combo else nameLabel)
         add(versionLabel)
         add(updateButton)
     }
@@ -191,6 +198,7 @@ class AgentSelector : JPanel(VerticalLayout(VERTICAL_GAP)) {
     }
 
     private fun refresh() {
+        nameLabel.text = current.name
         val custom = current.launcher.isCustom
         // What the registry says about a `binary` entry today, which is all it can say: the typed
         // command pins nothing, so there is no older version to offer an update from.

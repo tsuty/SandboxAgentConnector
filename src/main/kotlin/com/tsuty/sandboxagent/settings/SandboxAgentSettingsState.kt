@@ -5,6 +5,7 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.project.Project
 import com.intellij.util.xmlb.XmlSerializerUtil
+import com.intellij.util.xmlb.annotations.XCollection
 import com.tsuty.sandboxagent.acp.SandboxConfig
 
 /**
@@ -27,36 +28,29 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
     var loginShellId: String = LoginShells.DEFAULT.id
 
     /**
-     * The ACP registry entry of the selected agent, kept field by field instead of as a command
-     * line ([AcpAgent]): the command is derived from it, and the version it holds is what makes a
-     * newer registry entry an update the settings dialog offers rather than a silent change.
+     * The enabled agents, in the order the settings dialog lists them; no registry id twice. A tab
+     * runs one of them, and only theirs can be started (see [enabledAgents]).
      */
-    var agentId: String = AcpAgentRegistry.FALLBACK_AGENT.id
-    var agentPackage: String = AcpAgentRegistry.FALLBACK_AGENT.packageName
-    var agentLauncher: String = AcpAgentRegistry.FALLBACK_AGENT.launcher.id
+    @get:XCollection(style = XCollection.Style.v2)
+    var agents: MutableList<AgentEntry> = mutableListOf()
 
-    /** Arguments of the distribution, separated by spaces; the registry has none with a space. */
+    /** Registry id of the agent `+` opens a tab with (see [defaultAgent]). */
+    var defaultAgentId: String = ""
+
+    /*
+     * The one agent of a version that ran a single agent, field by field. Only read to move it
+     * into [agents] (see [loadState]); emptied right after, which keeps them out of the file.
+     * Their defaults are empty instead of the fallback agent's for that very reason, and an empty
+     * field stands for the fallback agent's value, which is what such a version stored as nothing.
+     */
+    var agentId: String = ""
+    var agentPackage: String = ""
+    var agentLauncher: String = ""
     var agentArgs: String = ""
     var agentVersion: String = ""
     var agentDescription: String = ""
-
-    /**
-     * The command typed for an agent that ships as a pre-built `binary`, and the one exception to
-     * everything said above: there is no package to derive a command from, the executable was
-     * installed into the sandbox by hand, and only its owner knows where. Empty for every other
-     * launcher, which never reads it (see [AgentLauncher.BINARY]).
-     */
     var agentCommand: String = ""
-
-    /**
-     * How the selected agent presents itself: the `name` and the `icon` of its registry entry,
-     * kept here so the UI never has to reach the registry again (see [AgentIcon]). The icon is
-     * stored as the markup itself, and [agentIconUrl] only says which file it was downloaded from,
-     * so a changed entry is noticed and downloaded again.
-     *
-     * The drawing is empty until an agent was picked once, and the UI falls back to its own then.
-     */
-    var agentName: String = AcpAgentRegistry.FALLBACK_AGENT.name
+    var agentName: String = ""
     var agentIconUrl: String = ""
     var agentIconSvg: String = ""
 
@@ -109,50 +103,41 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
     /** The persisted login shell, degrading to the default when it named an unknown one. */
     fun loginShell(): LoginShell = LoginShells.byId(loginShellId)
 
-    /** Name shown for the agent, which is the one of the registry entry until there is none. */
-    fun agentNameOrDefault(): String = agentName.takeIf { it.isNotBlank() } ?: DEFAULT_AGENT_NAME
+    /**
+     * The enabled agents. Never empty: a project whose settings were never stored runs the
+     * fallback agent, exactly like a version that ran a single agent did.
+     */
+    fun enabledAgents(): List<AgentEntry> = agents.ifEmpty { listOf(AgentEntry.of(AcpAgentRegistry.FALLBACK_AGENT)) }
+
+    /** The agent `+` opens a tab with: the checked one, or the first when that is gone. */
+    fun defaultAgent(): AgentEntry = enabledAgents().let { enabled -> enabled.firstOrNull { it.id == defaultAgentId } ?: enabled.first() }
+
+    /** The enabled agent of [id]; `null` when it is not enabled (any more). */
+    fun agentById(id: String): AgentEntry? = enabledAgents().firstOrNull { it.id == id }
+
+    fun isEnabled(agentId: String): Boolean = agentById(agentId) != null
 
     /**
-     * The persisted agent, as the settings dialog and the sandbox layer read it. The environment
-     * variables of the registry entry are not part of it: they are a hint of the settings dialog
-     * and are never persisted (see [AcpAgent.env]).
+     * Replaces the enabled agents. A registry id listed twice keeps its first entry, and a
+     * [defaultId] that is not among them falls back to the first agent (see [defaultAgent]).
      */
-    fun agent(): AcpAgent {
-        val launcher = AgentLauncher.of(agentLauncher)
-        return AcpAgent(
-            id = agentId.ifBlank { AcpAgentRegistry.FALLBACK_AGENT.id },
-            name = agentNameOrDefault(),
-            // A typed command has no package, so falling back to the one of the default agent
-            // would invent a package the selected entry never had.
-            packageName = agentPackage.ifBlank {
-                if (launcher.isCustom) "" else AcpAgentRegistry.FALLBACK_AGENT.packageName
-            },
-            launcher = launcher,
-            args = agentArgs.split(' ').filter { it.isNotBlank() },
-            version = agentVersion,
-            description = agentDescription,
-            iconUrl = agentIconUrl.takeIf { it.isNotBlank() },
-            customCommand = agentCommand,
-        )
+    fun updateAgents(entries: List<AgentEntry>, defaultId: String) {
+        val unique = entries.distinctBy { it.id }
+        agents = unique.map { it.copy() }.toMutableList()
+        defaultAgentId = defaultId.takeIf { id -> unique.any { it.id == id } } ?: unique.firstOrNull()?.id.orEmpty()
     }
 
-    /** Stores a picked agent. The drawing is not touched: it is downloaded separately. */
-    fun setAgent(agent: AcpAgent) {
-        agentId = agent.id
-        agentPackage = agent.packageName
-        agentLauncher = agent.launcher.id
-        agentArgs = agent.args.joinToString(" ")
-        agentVersion = agent.version
-        agentDescription = agent.description
-        agentName = agent.name
-        agentCommand = agent.customCommand
+    /** Stores the drawing of the enabled agent [agentId]; a no-op for one that is not enabled. */
+    fun updateAgentIcon(agentId: String, iconUrl: String, iconSvg: String) {
+        if (agents.isEmpty()) agents = enabledAgents().toMutableList()
+        agents.firstOrNull { it.id == agentId }?.let {
+            it.iconUrl = iconUrl
+            it.iconSvg = iconSvg
+        }
     }
 
-    /** The stored drawing of the agent; `null` whenever the bundled one is to be used instead. */
-    fun agentIconSvgOrNull(): String? = agentIconSvg.takeIf { it.isNotBlank() }
-
-    /** The color the selected agent is drawn in; `null` leaves its drawing as it is. */
-    fun agentColorOrNull(): String? = AgentColors.resolve(agent().id, agentColors)
+    /** The color [agentId] is drawn in; `null` leaves its drawing as it is. */
+    fun agentColorOrNull(agentId: String): String? = AgentColors.resolve(agentId, agentColors)
 
     /** The persisted idle timeout, kept inside the range the settings dialog offers. */
     fun initializeIdleTimeoutSecondsOrDefault(): Int =
@@ -169,13 +154,55 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
         // Stored settings without the legacy owner were written by a version that ran one agent
         // only: the snapshots of this project are that agent's.
         if (legacyAgentId.isBlank()) legacyAgentId = agentId.ifBlank { AcpAgentRegistry.FALLBACK_AGENT.id }
+        if (agents.isEmpty()) {
+            val legacy = legacyAgent()
+            agents = mutableListOf(legacy)
+            defaultAgentId = legacy.id
+        }
+        clearLegacyAgent()
     }
 
-    /** Maps the persisted values onto the sandbox process layer configuration. */
-    fun toSandboxConfig(): SandboxConfig = SandboxConfig(
+    /**
+     * The agent of a version that ran a single agent. Such a version stored a value equal to its
+     * default as nothing, and those defaults were the fallback agent's, which is what an empty
+     * field is read as. A typed command has no package, so the fallback package is not invented
+     * for it.
+     */
+    private fun legacyAgent(): AgentEntry {
+        val fallback = AcpAgentRegistry.FALLBACK_AGENT
+        val launcher = AgentLauncher.of(agentLauncher.ifBlank { fallback.launcher.id })
+        return AgentEntry(
+            id = agentId.ifBlank { fallback.id },
+            packageName = agentPackage.ifBlank { if (launcher.isCustom) "" else fallback.packageName },
+            launcher = launcher.id,
+            args = agentArgs,
+            version = agentVersion,
+            description = agentDescription,
+            command = agentCommand,
+            name = agentName.ifBlank { fallback.name },
+            iconUrl = agentIconUrl,
+            iconSvg = agentIconSvg,
+        )
+    }
+
+    private fun clearLegacyAgent() {
+        agentId = ""
+        agentPackage = ""
+        agentLauncher = ""
+        agentArgs = ""
+        agentVersion = ""
+        agentDescription = ""
+        agentCommand = ""
+        agentName = ""
+        agentIconUrl = ""
+        agentIconSvg = ""
+    }
+
+    /** Maps the persisted values onto the sandbox process layer configuration of [agent]. */
+    fun toSandboxConfig(agent: AcpAgent = defaultAgent().agent()): SandboxConfig = SandboxConfig(
         sandboxCommand = SandboxTypes.byId(sandboxTypeId).command,
         sandboxName = sandboxName,
-        agentCommand = agent().command,
+        agentCommand = agent.command,
         sandboxWorkspacePath = sandboxWorkspacePath,
         restoreLastSession = restoreLastSession,
         initializeIdleTimeoutSeconds = initializeIdleTimeoutSecondsOrDefault(),
@@ -189,9 +216,6 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
         const val DEFAULT_INITIALIZE_IDLE_TIMEOUT_SECONDS: Int = 180
         const val MIN_INITIALIZE_IDLE_TIMEOUT_SECONDS: Int = 10
         const val MAX_INITIALIZE_IDLE_TIMEOUT_SECONDS: Int = 1800
-
-        /** Shown when the settings hold no name yet, which is what an old installation has. */
-        const val DEFAULT_AGENT_NAME: String = "Agent"
 
         const val DEFAULT_TRANSCRIPT_FONT_SIZE: Int = 13
         const val MIN_TRANSCRIPT_FONT_SIZE: Int = 8
