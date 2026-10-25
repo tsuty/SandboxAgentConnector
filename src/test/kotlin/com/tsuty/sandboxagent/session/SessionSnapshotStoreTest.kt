@@ -361,4 +361,84 @@ class SessionSnapshotStoreTest {
         assertEquals(SESSION_SNAPSHOT_SCHEMA_VERSION, assertNotNull(store.load("sess_1")).schemaVersion)
         assertNull(SessionSnapshotMigrators.migrate(JsonObject(emptyMap()), 0))
     }
+
+    private val claude = SnapshotAgent(id = "claude-acp", name = "Claude Agent", legacyId = "claude-acp")
+    private val gemini = SnapshotAgent(id = "gemini", name = "Gemini CLI", legacyId = "claude-acp")
+
+    @Test
+    fun `a snapshot names its agent and the time it was saved`() {
+        val (store, _) = tempStore(now = 9_000L)
+
+        assertEquals(SaveResult.SAVED, store.save("sess_1", listOf(UserMessageEntry("hi")), agent = gemini))
+
+        val snapshot = assertNotNull(store.load("sess_1"))
+        assertEquals("gemini", snapshot.agentId)
+        assertEquals("Gemini CLI", snapshot.agentName)
+        assertEquals(9_000L, snapshot.savedAt)
+        assertEquals(SESSION_SNAPSHOT_SCHEMA_VERSION, snapshot.schemaVersion)
+    }
+
+    @Test
+    fun `a snapshot written before the agent was kept belongs to the legacy agent`() {
+        val (store, directory) = tempStore()
+        directory.mkdirs()
+        File(directory, "sess_old.json").writeText(
+            """{"schemaVersion":1,"sessionId":"sess_old","entries":[{"entry":"user_message","text":"hi"}]}""",
+        )
+
+        val snapshot = assertNotNull(store.load("sess_old"))
+        assertNull(snapshot.agentId)
+        assertNull(snapshot.savedAt)
+        assertEquals("claude-acp", snapshot.ownerAgentId("claude-acp"))
+        assertNull(store.conflictingOwner("sess_old", claude))
+        assertEquals("claude-acp", store.conflictingOwner("sess_old", gemini))
+    }
+
+    @Test
+    fun `the new fields are left out of a file that has none`() {
+        val (store, directory) = tempStore()
+
+        store.save("sess_1", listOf(UserMessageEntry("hi")))
+
+        val text = assertNotNull(store.readText(File(directory, "sess_1.json")))
+        assertFalse(text.contains("agentId"), text)
+        assertTrue(text.contains("savedAt"), text)
+    }
+
+    @Test
+    fun `a snapshot of another agent is never overwritten`() {
+        val (store, _) = tempStore()
+        store.save("sess_1", listOf(UserMessageEntry("claude's")), agent = claude)
+
+        assertEquals(SaveResult.CONFLICT, store.save("sess_1", listOf(UserMessageEntry("gemini's")), agent = gemini))
+
+        val snapshot = assertNotNull(store.load("sess_1"))
+        assertEquals("claude-acp", snapshot.agentId)
+        assertEquals("claude's", assertIs<UserMessageEntry>(snapshot.entries.single()).text)
+        assertEquals(SaveResult.SAVED, store.save("sess_1", listOf(UserMessageEntry("again")), agent = claude))
+    }
+
+    @Test
+    fun `a deleted session of another agent still blocks its id`() {
+        val (store, _) = tickingStore()
+        store.save("sess_1", listOf(UserMessageEntry("claude's")), agent = claude)
+        store.moveToDeleted("sess_1")
+
+        assertEquals("claude-acp", store.conflictingOwner("sess_1", gemini))
+        assertEquals(SaveResult.CONFLICT, store.save("sess_1", listOf(UserMessageEntry("gemini's")), agent = gemini))
+        assertNull(store.conflictingOwner("sess_1", claude))
+        assertNull(store.conflictingOwner("sess_unknown", gemini))
+    }
+
+    @Test
+    fun `a replaced snapshot keeps its owner`() {
+        val (store, _) = tickingStore()
+        store.save("sess_1", listOf(UserMessageEntry("a"), AgentMessageEntry("b", "m1")), agent = gemini)
+
+        val replaced = assertNotNull(store.replaceIfChanged("sess_1", listOf(AgentMessageEntry("c", "m2"))))
+
+        assertEquals("gemini", replaced.agentId)
+        assertEquals("Gemini CLI", replaced.agentName)
+        assertNotNull(replaced.savedAt)
+    }
 }

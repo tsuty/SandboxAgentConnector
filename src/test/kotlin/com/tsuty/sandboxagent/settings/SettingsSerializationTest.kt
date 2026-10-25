@@ -140,4 +140,25 @@ class SettingsSerializationTest {
             SandboxAgentSettingsState().toSandboxConfig(),
         )
     }
+
+    @Test
+    fun `the legacy owner of the snapshots is recorded once from the stored agent`() {
+        val stored = SandboxAgentSettingsState().apply { agentId = "gemini" }
+        val element = XmlSerializer.serialize(stored.state)
+
+        val loaded = SandboxAgentSettingsState()
+        loaded.loadState(XmlSerializer.deserialize(element, SandboxAgentSettingsState::class.java))
+        assertEquals("gemini", loaded.legacyAgentIdOrDefault())
+
+        // Picking another agent later does not move it.
+        loaded.agentId = "codex"
+        val reloaded = SandboxAgentSettingsState()
+        reloaded.loadState(XmlSerializer.deserialize(XmlSerializer.serialize(loaded.state), SandboxAgentSettingsState::class.java))
+        assertEquals("gemini", reloaded.legacyAgentIdOrDefault())
+    }
+
+    @Test
+    fun `a project without stored settings ran the default agent`() {
+        assertEquals("claude-acp", SandboxAgentSettingsState().legacyAgentIdOrDefault())
+    }
 }

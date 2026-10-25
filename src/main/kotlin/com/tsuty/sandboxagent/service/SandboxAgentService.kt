@@ -62,11 +62,13 @@ import com.tsuty.sandboxagent.acp.promptAttachments
 import com.tsuty.sandboxagent.acp.userPromptText
 import com.tsuty.sandboxagent.session.LocalSessionFile
 import com.tsuty.sandboxagent.session.LocalSessionIndex
+import com.tsuty.sandboxagent.session.SaveResult
 import com.tsuty.sandboxagent.session.SessionLockRegistry
 import com.tsuty.sandboxagent.session.SessionMetadataStore
 import com.tsuty.sandboxagent.session.SessionSnapshot
 import com.tsuty.sandboxagent.session.SessionSnapshotStore
 import com.tsuty.sandboxagent.session.SessionTranscriptRecorder
+import com.tsuty.sandboxagent.session.SnapshotAgent
 import com.tsuty.sandboxagent.session.TranscriptEntry
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
 import com.tsuty.sandboxagent.vfs.AgentWorkspaceGuard
@@ -674,6 +676,7 @@ class SandboxAgentService(
     private suspend fun createSession(acpClient: AcpClient): String {
         // `mcpServers` stays empty on purpose: MCP is configured by the agent inside the sandbox.
         val created = acpClient.newSession(SessionNewParams(cwd = resolvedCwd(), mcpServers = emptyList()))
+        conflictingOwner(created.sessionId)?.let { throw SessionIdConflictException(created.sessionId, it) }
         adoptSession(created.sessionId, title = null, pristine = true)
         // A session freshly created by `session/new` never has a lock owner yet, so this only
         // fails if another owner raced us with a `session/load` of the very same id in between.
@@ -701,6 +704,8 @@ class SandboxAgentService(
     private suspend fun createSessionReporting(acpClient: AcpClient) {
         try {
             createSession(acpClient)
+        } catch (e: SessionIdConflictException) {
+            failWithConflict(e)
         } catch (e: Exception) {
             log.info("session/new failed; the session is created with the next prompt instead", e)
             publish(SandboxAgentEvent.Error(sessionCreationFailureMessage(e), e))
@@ -923,6 +928,10 @@ class SandboxAgentService(
             return
         }
         val sessionId = entry.sessionId
+        conflictingOwner(sessionId)?.let { owner ->
+            publish(SandboxAgentEvent.SessionRestoreRejected(sessionId, conflictMessage(sessionId, owner)))
+            return
+        }
         // Ph2 SS3.3/SS3.4: the previous session's lock is released before the new one is claimed,
         // so re-entering the very same session never has to fight its own lock.
         if (sessionId != sessionIdRef.get() && !acquireSessionLock(sessionId)) {
@@ -1079,13 +1088,55 @@ class SandboxAgentService(
     private fun saveSnapshot(sessionId: String, title: String? = sessionTitleRef.get()) {
         val entries = recorder.entries()
         if (entries.isEmpty()) return
-        runCatching {
+        val agent = snapshotAgent()
+        val result = runCatching {
             snapshotStore.save(
                 sessionId = sessionId,
                 entries = entries,
                 title = title,
+                agent = agent,
             )
-        }.onFailure { log.warn("Failed to save the snapshot of $sessionId", it) }
+        }.onFailure { log.warn("Failed to save the snapshot of $sessionId", it) }.getOrNull()
+        // Only reachable when the files appeared after the session was entered: both the creation
+        // and the entering of a session already refuse an id another agent owns.
+        if (result == SaveResult.CONFLICT && agent != null) {
+            val owner = runCatching { snapshotStore.conflictingOwner(sessionId, agent) }.getOrNull() ?: return
+            failWithConflict(SessionIdConflictException(sessionId, owner))
+        }
+    }
+
+    /** The agent the snapshots of this tab are written for; `null` without settings (light tests). */
+    private fun snapshotAgent(): SnapshotAgent? = runCatching {
+        val settings = SandboxAgentSettingsState.getInstance(project)
+        SnapshotAgent(settings.agent().id, settings.agentNameOrDefault(), settings.legacyAgentIdOrDefault())
+    }.getOrNull()
+
+    /**
+     * The agent owning the local files of [sessionId] when that is not the agent of this tab (see
+     * [SessionSnapshotStore.conflictingOwner]); `null` when there is none, or nothing to check.
+     */
+    private fun conflictingOwner(sessionId: String): String? {
+        val agent = snapshotAgent() ?: return null
+        return runCatching { snapshotStore.conflictingOwner(sessionId, agent) }
+            .onFailure { log.warn("Failed to check the owner of the local files of $sessionId", it) }
+            .getOrNull()
+    }
+
+    private fun conflictMessage(sessionId: String, owner: String): String =
+        "The session id \"$sessionId\" is already used by a local session of the agent \"$owner\". " +
+            "Its local history is left untouched, and this session cannot be used in the IDE."
+
+    /**
+     * Puts the tab into the error state for a session id that another agent owns locally. Using
+     * the session would overwrite that agent's history, and the id is the agent's choice, so
+     * there is nothing to retry: the connection is closed, like a failed start.
+     */
+    private fun failWithConflict(conflict: SessionIdConflictException) {
+        log.warn(conflict.message)
+        val message = conflictMessage(conflict.sessionId, conflict.owner)
+        setState(SessionState.ERROR, message)
+        publish(SandboxAgentEvent.Error(message, conflict))
+        closeSession()
     }
 
     /** Local title override of a session; the agent has no `session/rename` counterpart. */
@@ -1158,6 +1209,9 @@ class SandboxAgentService(
         // eager `session/new` failed, or when the agent lost the session in between.
         val sessionId = sessionIdRef.get() ?: try {
             createSession(acpClient)
+        } catch (e: SessionIdConflictException) {
+            failWithConflict(e)
+            return
         } catch (e: Exception) {
             publish(SandboxAgentEvent.Error(e.message ?: "session/new failed", e))
             return
@@ -1591,6 +1645,10 @@ class SandboxAgentService(
         private const val LOCK_HEARTBEAT_MILLIS = 20_000L
     }
 }
+
+/** A session id the agent handed out is owned by another agent in the local session directory. */
+class SessionIdConflictException(val sessionId: String, val owner: String) :
+    IllegalStateException("Session id $sessionId is owned locally by the agent $owner")
 
 /** Convenience helper for the transcript: `"Turn finished"`, `"Cancelled"`, ... */
 fun SandboxAgentEvent.TurnFinished.presentableText(): String = StopReason.presentableText(stopReason)

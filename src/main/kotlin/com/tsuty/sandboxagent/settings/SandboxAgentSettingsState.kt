@@ -67,6 +67,16 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
      */
     var agentColors: MutableMap<String, String> = LinkedHashMap()
 
+    /**
+     * The agent the session snapshots written before they named their agent belong to (see
+     * `SessionSnapshot.ownerAgentId`): the one agent this project ran when the plugin started
+     * keeping it. Recorded once, by [loadState], and never changed afterwards.
+     */
+    var legacyAgentId: String = ""
+
+    /** [legacyAgentId], or the default agent for a project whose settings were never stored. */
+    fun legacyAgentIdOrDefault(): String = legacyAgentId.ifBlank { AcpAgentRegistry.FALLBACK_AGENT.id }
+
     /** ACP `cwd` sent with `session/new`; empty means "use the local project root". */
     var sandboxWorkspacePath: String = ""
     var restoreLastSession: Boolean = false
@@ -156,6 +166,9 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
 
     override fun loadState(state: SandboxAgentSettingsState) {
         XmlSerializerUtil.copyBean(state, this)
+        // Stored settings without the legacy owner were written by a version that ran one agent
+        // only: the snapshots of this project are that agent's.
+        if (legacyAgentId.isBlank()) legacyAgentId = agentId.ifBlank { AcpAgentRegistry.FALLBACK_AGENT.id }
     }
 
     /** Maps the persisted values onto the sandbox process layer configuration. */

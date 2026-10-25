@@ -84,8 +84,14 @@ data object TurnEndEntry : TranscriptEntry
 /**
  * Locally stored display state of one session.
  *
- * No update time is kept: the agent moves its update time on a mere `session/load` /
+ * The agent's update time is not kept: the agent moves it on a mere `session/load` /
  * `session/resume`, so it cannot decide whether the snapshot is shown (see [isRestorable]).
+ * [savedAt] is the time *this plugin* wrote the file instead, which is what the list of recent
+ * sessions sorts and dates by.
+ *
+ * [agentId], [agentName] and [savedAt] were added without a schema version bump: they are
+ * optional, so a version that does not know them still reads the file (it ignores unknown keys),
+ * and a file written before them reads with `null` (see [ownerAgentId]).
  */
 @Serializable
 data class SessionSnapshot(
@@ -93,13 +99,42 @@ data class SessionSnapshot(
     val sessionId: String,
     val title: String? = null,
     val entries: List<TranscriptEntry> = emptyList(),
+    /** Registry id of the agent the session belongs to; `null` in a file written before it was kept. */
+    val agentId: String? = null,
+    /** Name of that agent, so a session of an agent that is no longer enabled can still be labelled. */
+    val agentName: String? = null,
+    /** Epoch millis of the write; `null` in a file written before it was kept. */
+    val savedAt: Long? = null,
 ) {
+    /**
+     * The agent the session belongs to. A file written before [agentId] was kept belongs to
+     * [legacyAgentId]: the one agent the plugin could run back then.
+     */
+    fun ownerAgentId(legacyAgentId: String): String = agentId ?: legacyAgentId
+
     /**
      * `true` when the snapshot is shown instead of replaying the history: whenever it holds
      * anything. The local record always wins over the agent's, which only a replay of a session
      * without local history ever uses.
      */
     val isRestorable: Boolean get() = entries.isNotEmpty()
+}
+
+/**
+ * The agent a snapshot is written for. [legacyId] is the owner of the files written before the
+ * owner was kept (see [SessionSnapshot.ownerAgentId]), so that they are told apart from [id] too.
+ */
+data class SnapshotAgent(val id: String, val name: String, val legacyId: String)
+
+/** Outcome of [SessionSnapshotStore.save]. */
+enum class SaveResult {
+    SAVED,
+
+    /** A file of the same session id belongs to another agent and was left as it is. */
+    CONFLICT,
+
+    /** Writing failed; it was logged. */
+    FAILED,
 }
 
 /**
@@ -150,22 +185,53 @@ class SessionSnapshotStore(
         classDiscriminator = "entry"
     }
 
-    /** Writes the snapshot of [sessionId]; failures are logged and never propagated to the caller. */
+    /**
+     * Writes the snapshot of [sessionId] for [agent]; failures are logged and never propagated to
+     * the caller.
+     *
+     * Session ids are chosen by the agents, so two agents may in theory hand out the same one, and
+     * every agent shares this directory. A file of that id owned by another agent is therefore
+     * never overwritten: [SaveResult.CONFLICT] is returned instead (see [conflictingOwner]).
+     */
     @Synchronized
     fun save(
         sessionId: String,
         entries: List<TranscriptEntry>,
         title: String? = null,
-    ) {
+        agent: SnapshotAgent? = null,
+    ): SaveResult {
+        if (agent != null && conflictingOwner(sessionId, agent) != null) return SaveResult.CONFLICT
         val snapshot = SessionSnapshot(
             sessionId = sessionId,
             title = title,
             entries = entries,
+            agentId = agent?.id,
+            agentName = agent?.name,
+            savedAt = clock(),
         )
-        try {
+        return try {
             write(snapshot)
+            SaveResult.SAVED
         } catch (e: Exception) {
             log.warn("Failed to save the session snapshot of $sessionId", e)
+            SaveResult.FAILED
+        }
+    }
+
+    /**
+     * The agent owning a local file of [sessionId] when that is not [agent], or `null` when no
+     * other agent owns any. The current snapshot decides as soon as there is one — every backup
+     * of it was copied from it — and only without one are the backups and the deleted files
+     * read, which is the first save of a session and nothing more.
+     */
+    @Synchronized
+    fun conflictingOwner(sessionId: String, agent: SnapshotAgent): String? {
+        read(fileOf(sessionId))?.let { current ->
+            return current.ownerAgentId(agent.legacyId).takeIf { it != agent.id }
+        }
+        val files = LocalSessionIndex.scan(directory).of(sessionId) ?: return null
+        return (files.backups + files.deleted).firstNotNullOfOrNull { file ->
+            read(file.file)?.ownerAgentId(agent.legacyId)?.takeIf { it != agent.id }
         }
     }
 
@@ -283,10 +349,14 @@ class SessionSnapshotStore(
         if (messageIdOutline(replayed).none { it != null }) return null
         if (sameTranscript(local.entries, replayed)) return null
         backup(sessionId) ?: return null
+        // The replay is the same session of the same agent: the owner of the local record stays.
         val snapshot = SessionSnapshot(
             sessionId = sessionId,
             title = title ?: local.title,
             entries = replayed,
+            agentId = local.agentId,
+            agentName = local.agentName,
+            savedAt = clock(),
         )
         return try {
             write(snapshot)
