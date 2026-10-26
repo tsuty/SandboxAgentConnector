@@ -1,5 +1,14 @@
 package com.tsuty.sandboxagent.settings
 
+import javax.swing.SwingConstants
+import javax.swing.JTable
+import javax.swing.JButton
+import com.intellij.util.ui.ColorIcon
+import com.intellij.ui.components.panels.VerticalLayout
+import com.intellij.ui.components.panels.HorizontalLayout
+import com.intellij.ui.components.JBLabel
+import com.intellij.ui.ColoredTableCellRenderer
+import com.intellij.ui.ColorPanel
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.ToolbarDecorator
@@ -14,7 +23,10 @@ import javax.swing.table.AbstractTableModel
 /**
  * The enabled agents of the settings dialog: a table with `+` / `-`, the default agent checked in
  * its first column, and below it the [AgentSelector] of the selected row, which shows its version,
- * offers its update and takes the command of a `binary` agent.
+ * offers its update and takes the command of a `binary` agent, and the color of that agent.
+ *
+ * The color belongs to the agent and not to the dialog: every agent of the list has its own, shown
+ * as a swatch next to its name, and picked for the selected row (see [AgentColors]).
  *
  * `+` lists the registry entries that are not enabled yet, so an agent can never be enabled twice;
  * `-` is disabled for the last agent left. The rules themselves live in [AgentListEdits].
@@ -54,6 +66,16 @@ class AgentListPanel : JPanel(BorderLayout()) {
         }
     }
 
+    /** The agent's name with a swatch of its color; no swatch for an agent drawn as before. */
+    private val nameRenderer = object : ColoredTableCellRenderer() {
+        override fun customizeCellRenderer(table: JTable, value: Any?, selected: Boolean, hasFocus: Boolean, row: Int, column: Int) {
+            val entry = edits.entries.getOrNull(row) ?: return
+            icon = AgentColors.toColor(edits.colorOf(entry.id))?.let { ColorIcon(JBUI.scale(SWATCH_SIZE), it) }
+            iconTextGap = JBUI.scale(SWATCH_GAP)
+            append(entry.nameOrDefault())
+        }
+    }
+
     private val table = JBTable(model).apply {
         setSelectionMode(ListSelectionModel.SINGLE_SELECTION)
         setShowGrid(false)
@@ -62,6 +84,7 @@ class AgentListPanel : JPanel(BorderLayout()) {
             maxWidth = JBUI.scale(DEFAULT_COLUMN_WIDTH)
             preferredWidth = JBUI.scale(DEFAULT_COLUMN_WIDTH)
         }
+        columnModel.getColumn(1).cellRenderer = nameRenderer
         visibleRowCount = VISIBLE_ROWS
         selectionModel.addListSelectionListener { if (!it.valueIsAdjusting) showSelected() }
     }
@@ -75,6 +98,29 @@ class AgentListPanel : JPanel(BorderLayout()) {
         onValidationChanged = { takeSelectorEdit() }
     }
 
+    /** Set while the color of the selected row is being shown, which is not a choice. */
+    private var showingColor = false
+
+    private val colorPanel = ColorPanel().apply {
+        addActionListener {
+            if (showingColor) return@addActionListener
+            val color = selectedColor ?: return@addActionListener
+            setSelectedColor(AgentColors.toHex(color))
+        }
+    }
+
+    private val resetColorButton = JButton("Reset to Default").apply {
+        addActionListener { setSelectedColor(null) }
+    }
+
+    /** `Color: [swatch] [Reset to Default]`, for the agent of the selected row. */
+    private val colorRow = JPanel(HorizontalLayout(SELECTOR_GAP, SwingConstants.CENTER)).apply {
+        isOpaque = false
+        add(JBLabel("Color:"))
+        add(colorPanel)
+        add(resetColorButton)
+    }
+
     /** The decorated table, with its `+` / `-` toolbar. */
     private val decorated = ToolbarDecorator.createDecorator(table)
         .setAddAction { button -> showAddPopup(button.preferredPopupPoint) }
@@ -85,16 +131,19 @@ class AgentListPanel : JPanel(BorderLayout()) {
         .disableUpDownActions()
         .createPanel()
 
-    /** Told about the selected agent whenever it may have changed (its color follows it). */
-    var onSelectionChanged: ((AcpAgent) -> Unit)? = null
-
     /** Told whenever the edits change, so UI DSL validation installed on this component re-runs. */
     var onValidationChanged: (() -> Unit)? = null
 
     init {
         isOpaque = false
         add(decorated, BorderLayout.CENTER)
-        add(selector.apply { border = JBUI.Borders.emptyTop(SELECTOR_GAP) }, BorderLayout.SOUTH)
+        val details = JPanel(VerticalLayout(SELECTOR_GAP)).apply {
+            isOpaque = false
+            border = JBUI.Borders.emptyTop(SELECTOR_GAP)
+            add(selector)
+            add(colorRow)
+        }
+        add(details, BorderLayout.SOUTH)
     }
 
     /** The agent of the selected row; the default one when nothing is selected. */
@@ -103,7 +152,7 @@ class AgentListPanel : JPanel(BorderLayout()) {
 
     /** Pushes the persisted agents in. */
     fun reset(settings: SandboxAgentSettingsState) {
-        edits = AgentListEdits(settings.enabledAgents(), settings.defaultAgent().id)
+        edits = AgentListEdits(settings.enabledAgents(), settings.defaultAgent().id, settings.agentColors)
         model.fireTableDataChanged()
         select(edits.entries.indexOfFirst { it.id == edits.defaultId }.coerceAtLeast(0))
     }
@@ -162,8 +211,28 @@ class AgentListPanel : JPanel(BorderLayout()) {
         } finally {
             showing = false
         }
-        onSelectionChanged?.invoke(entry.agent())
+        showColor(entry.id)
         onValidationChanged?.invoke()
+    }
+
+    /** Stores [hex] as the color of the selected agent; `null` resets it to the agent's default. */
+    private fun setSelectedColor(hex: String?) {
+        val row = table.selectedRow
+        val entry = edits.entries.getOrNull(row) ?: return
+        edits.setColor(entry.id, hex)
+        model.fireTableRowsUpdated(row, row)
+        showColor(entry.id)
+        changed()
+    }
+
+    /** Shows the color [agentId] would be drawn in, empty for one drawn as before. */
+    private fun showColor(agentId: String) {
+        showingColor = true
+        try {
+            colorPanel.selectedColor = AgentColors.toColor(edits.colorOf(agentId))
+        } finally {
+            showingColor = false
+        }
     }
 
     private fun takeSelectorEdit() {
@@ -185,5 +254,7 @@ class AgentListPanel : JPanel(BorderLayout()) {
         const val DEFAULT_COLUMN_WIDTH = 64
         const val VISIBLE_ROWS = 5
         const val SELECTOR_GAP = 6
+        const val SWATCH_SIZE = 10
+        const val SWATCH_GAP = 6
     }
 }

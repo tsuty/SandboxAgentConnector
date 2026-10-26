@@ -99,4 +99,36 @@ class AgentListEditsTest {
         assertEquals("<svg/>", settings.agentById("gemini")?.iconSvg)
         assertFalse(edits.differsFrom(settings))
     }
+
+    @Test
+    fun `every agent keeps a color of its own`() {
+        val edits = AgentListEdits(listOf(AgentEntry.of(claude), AgentEntry.of(gemini)), "claude-acp", mapOf("gemini" to "#000000"))
+
+        assertEquals("#CC7C5E", edits.colorOf("claude-acp"))
+        assertEquals("#000000", edits.colorOf("gemini"))
+
+        edits.setColor("claude-acp", "#123abc")
+        edits.setColor("gemini", null)
+        assertEquals("#123ABC", edits.colorOf("claude-acp"))
+        assertEquals("#4A83F7", edits.colorOf("gemini"))
+        // A color equal to the default is not stored.
+        edits.setColor("claude-acp", "#cc7c5e")
+        assertEquals(emptyMap(), edits.colors)
+    }
+
+    @Test
+    fun `the color of a removed agent is kept and applied`() {
+        val settings = SandboxAgentSettingsState()
+        settings.updateAgents(listOf(AgentEntry.of(claude), AgentEntry.of(gemini)), "claude-acp")
+        val edits = AgentListEdits(settings.enabledAgents(), settings.defaultAgent().id, settings.agentColors)
+
+        edits.setColor("gemini", "#111111")
+        assertTrue(edits.differsFrom(settings))
+        edits.remove(1)
+        edits.applyTo(settings)
+
+        assertEquals(mapOf("gemini" to "#111111"), settings.agentColors)
+        assertFalse(edits.differsFrom(settings))
+        assertEquals("#111111", AgentListEdits(settings.enabledAgents(), "", settings.agentColors).colorOf("gemini"))
+    }
 }

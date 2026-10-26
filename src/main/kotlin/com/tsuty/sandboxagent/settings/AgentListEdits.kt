@@ -7,9 +7,20 @@ package com.tsuty.sandboxagent.settings
  *
  * - no registry id is enabled twice, since the id is what tells the sessions of the agents apart;
  * - there is always at least one agent, and exactly one of them is the default;
- * - removing the default makes the first agent left the default.
+ * - removing the default makes the first agent left the default;
+ * - every agent has a color of its own ([colorOf]); one equal to the agent's default is not
+ *   stored, and the color of a removed agent is kept, so it is back when the agent is added again.
  */
-class AgentListEdits(entries: List<AgentEntry>, defaultId: String) {
+class AgentListEdits(
+    entries: List<AgentEntry>,
+    defaultId: String,
+    colors: Map<String, String> = emptyMap(),
+) {
+
+    private val _colors: MutableMap<String, String> = LinkedHashMap(colors)
+
+    /** The chosen colors by agent id, the removed agents' included (see [AgentColors]). */
+    val colors: Map<String, String> get() = _colors
 
     private val _entries: MutableList<AgentEntry> = entries.distinctBy { it.id }.map { it.copy() }.toMutableList()
 
@@ -62,8 +73,18 @@ class AgentListEdits(entries: List<AgentEntry>, defaultId: String) {
         _entries[index] = AgentEntry.of(agent, iconSvg)
     }
 
+    /** The color [agentId] is drawn in with these edits; `null` leaves its drawing as it is. */
+    fun colorOf(agentId: String): String? = AgentColors.resolve(agentId, _colors)
+
+    /** Gives [agentId] the color [hex]; `null`, or its default color, resets it to the default. */
+    fun setColor(agentId: String, hex: String?) {
+        val normalized = hex?.let { AgentColors.normalize(it) }
+        if (normalized == null || normalized == AgentColors.defaultOf(agentId)) _colors.remove(agentId) else _colors[agentId] = normalized
+    }
+
     /** Whether applying these edits would change [settings]. */
     fun differsFrom(settings: SandboxAgentSettingsState): Boolean {
+        if (_colors != settings.agentColors) return true
         val stored = settings.enabledAgents()
         if (defaultId != settings.defaultAgent().id) return true
         if (stored.size != _entries.size) return true
@@ -92,6 +113,7 @@ class AgentListEdits(entries: List<AgentEntry>, defaultId: String) {
             }
         }
         settings.updateAgents(merged, defaultId)
+        settings.agentColors = LinkedHashMap(_colors)
     }
 
     private fun resolveDefault(id: String): String =
