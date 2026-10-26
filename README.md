@@ -97,6 +97,8 @@ For more detailed specifications and design information, refer to the following 
   Design note of the JCEF based transcript: the host ⇔ web event protocol, security barriers, and the plain text fallback.
 - **[Icons (docs/development/ICONS.md)](docs/development/ICONS.md)**:
   Icon inventory, drawing rules and how the transcript icon sprite is built.
+- **[Session Capabilities of the ACP Registry Agents (docs/development/AGENT_SESSION_CAPABILITIES.md)](docs/development/AGENT_SESSION_CAPABILITIES.md)**:
+  The session capabilities every registry agent declares, what they mean for session management, and how to survey them again.
 
 
 ---
