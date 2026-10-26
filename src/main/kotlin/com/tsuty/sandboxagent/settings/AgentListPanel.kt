@@ -45,7 +45,7 @@ class AgentListPanel : JPanel(BorderLayout()) {
         override fun getRowCount(): Int = edits.size
         override fun getColumnCount(): Int = 3
         override fun getColumnName(column: Int): String = COLUMNS[column]
-        override fun getColumnClass(column: Int): Class<*> = if (column == 0) java.lang.Boolean::class.java else String::class.java
+        override fun getColumnClass(column: Int): Class<*> = if (column == 0) Boolean::class.javaObjectType else String::class.java
         override fun isCellEditable(row: Int, column: Int): Boolean = column == 0
 
         override fun getValueAt(row: Int, column: Int): Any {
