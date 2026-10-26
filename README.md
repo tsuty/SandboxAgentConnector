@@ -13,6 +13,7 @@ While leveraging the IDE's lightweight nature and rich GUI (editor, Diff viewers
 - **Inline Approval**: Preview file changes (compact Diff / full Diff) and pre-verify command executions, executing them only after explicit user approval.
 - **Local Session Protection**: Transcripts are kept locally and are never lost to the agent. A session with local history is drawn from it right away, and the history the agent replays in the background is compared with it by the ids of the agent messages (ACP `messageId`): only when they differ is the local transcript saved as a backup before the agent's version replaces it (backups are never deleted; the list shows the 20 newest). Deleting a session moves its transcript and its backups aside instead of erasing them. The session list shows at a glance whether a session is stored locally and has backups, and a backup or a deleted session opens in a **Read Only tab** that never connects to the sandbox.
 - **Local Session Search**: `Search Local Sessions` in the tool window options menu searches the full text of the locally stored sessions and their backups, deleted sessions included on request. The matching part is previewed as pretty printed JSON with the match highlighted, and a result reopens the session or opens it in a Read Only tab.
+- **Multiple Agents**: Several ACP agents can be enabled side by side in the same sandbox, each tab running one of them with its own icon and color. Sessions stay with the agent they belong to, and a session of an agent that is no longer enabled still opens read only.
 - **ACP (Agent Client Protocol) Compliant**: Complies with JSON-RPC 2.0-based ACP v1, enabling connections to ACP-compatible agents such as Claude Code.
 
 ---
@@ -58,8 +59,9 @@ Start a sandbox container with the project root mounted (e.g., Docker Sandboxes 
 
 ### 3. Connecting to the Agent and Usage
 1. Open the **Sandbox Agent** tool window from the right sidebar of the IDE.
-2. Click the connect icon on the toolbar to attach to the agent.
-3. Send instructions from the prompt input field to begin conversations or code modifications.
+2. Enable the agents you want under `Settings > Tools > Sandbox Agent Connector` (**ACP Agents**: add with `+`, check the default one). They all run in the same sandbox.
+3. The tool window starts on the recent local sessions of every agent: pick one to continue it, or open a new tab with `+` (the default agent) or the caret next to it (any enabled agent). Each tab attaches to the sandbox on its own.
+4. Send instructions from the prompt input field to begin conversations or code modifications.
 
 Settings can be reviewed and configured under `Settings > Tools > Sandbox Agent Connector`.
 

@@ -54,14 +54,16 @@ Package root: `com.tsuty.sandboxagent`, under `src/main/kotlin/...` (tests mirro
 - **`service/`** — `SandboxAgentService`, the project-level service that is the main entry point tying
   connection lifecycle, sessions and settings together.
 - **`settings/`** — Persistent plugin settings (`SandboxAgentSettingsState`, `PersistentStateComponent`,
-  per-project), the settings UI (`SandboxAgentSettingsConfigurable`), the ACP agent registry fetched from
+  per-project; a list of enabled `AgentEntry`s with one default, sharing one sandbox), the settings UI
+  (`SandboxAgentSettingsConfigurable`, whose agent list is `AgentListPanel` over `AgentListEdits`), the ACP agent registry fetched from
   the [ACP registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)
   (`AcpAgentRegistry`, `AcpAgent`), and validation for hand-entered `binary` agent commands
   (`AgentCommandValidator` — rejects shell metacharacters since commands are never run through a shell).
 - **`vfs/`** — `AgentWorkspaceGuard` + `AgentWritingAccessProvider` implement the read-only workspace lock
   while a turn runs (in-IDE only; disk permissions and the sandbox's own writes are unaffected).
 - **`ui/`** — Swing tool window shell: `SandboxAgentToolWindowFactory`, `SandboxAgentMainPanel`,
-  tabs (`SandboxAgentTabsPanel`/`TabsController` — one sandbox connection per tab), prompt input
+  tabs (`SandboxAgentTabsPanel`/`TabsController` — one sandbox connection and one fixed agent per tab;
+  `RecentSessionsPanel` is shown while no tab is open), prompt input
   (`PromptInputPanel`, context chips, slash command popup, session history popup), diff support
   (`UnifiedDiffSupport`), and `SandboxTerminal` (types the same attach command with `-t` into a bundled
   Terminal plugin tab; degrades to a notification when that optional dependency is disabled).
@@ -87,3 +89,6 @@ Package root: `com.tsuty.sandboxagent`, under `src/main/kotlin/...` (tests mirro
   because first-run `npx` downloads can take minutes.
 - Each tool window tab owns one sandbox process/connection; there is no "detach" action — closing the tab
   ends the session's process.
+- Session snapshots name their agent (`agentId`, optional, added without a `schemaVersion` bump); files
+  without one belong to `legacyAgentId`. A session id whose local files belong to another agent is an
+  error of the tab — another agent's snapshot is never overwritten.
