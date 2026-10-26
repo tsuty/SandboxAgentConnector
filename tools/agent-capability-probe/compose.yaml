@@ -1,0 +1,31 @@
+# Local run of the capability probe (see README.md):
+#   docker compose run --rm probe commands
+#   docker compose run --rm probe install
+#   docker compose run --rm probe probe --jobs 4
+services:
+  probe:
+    build: .
+    image: sandbox-agent-connector/agent-capability-probe
+    volumes:
+      # agents.tsv and results/ are written here, on the host.
+      - ./work:/work
+      # The script is mounted over the copy in the image, so an edit needs no rebuild.
+      - ./probe_capabilities.py:/opt/probe/probe_capabilities.py:ro
+      # npx / uvx downloads survive between runs; `docker compose down -v` clears them.
+      - npm-cache:/home/node/.npm
+      - uv-cache:/home/node/.cache/uv
+      # Binary agents installed by `install`, kept between runs like the caches above.
+      - agents:/home/node/agents
+    # Nothing of the host is passed: no credential, no home directory. Only the `env` the registry
+    # entries ask for (see the `# env` comments of agents.tsv), as a sandbox set up for the plugin
+    # would have them; fast-agent does not even start without a model.
+    environment:
+      AUGMENT_DISABLE_AUTO_UPDATE: "1"
+      DROID_DISABLE_AUTO_UPDATE: "true"
+      FACTORY_DROID_AUTO_UPDATE_ENABLED: "false"
+      FAST_AGENT_MODEL: codexplan
+
+volumes:
+  npm-cache:
+  uv-cache:
+  agents:
