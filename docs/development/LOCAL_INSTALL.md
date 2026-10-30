@@ -40,12 +40,10 @@ The `0.1.0` part corresponds to `pluginVersion` in `../../gradle.properties`.
 Internal structure of the ZIP (`unzip -l build/distributions/SandboxAgentConnector-0.1.0.zip`):
 
 ```
+SandboxAgentConnector/lib/SandboxAgentConnector-0.1.0-searchableOptions.jar
 SandboxAgentConnector/lib/SandboxAgentConnector-0.1.0.jar
-SandboxAgentConnector/lib/kotlin-stdlib-2.4.10.jar
 SandboxAgentConnector/lib/kotlinx-serialization-core-jvm-1.7.3.jar
 SandboxAgentConnector/lib/kotlinx-serialization-json-jvm-1.7.3.jar
-SandboxAgentConnector/lib/annotations-13.0.jar
-SandboxAgentConnector/lib/SandboxAgentConnector-0.1.0-searchableOptions.jar
 ```
 
 > The initial clean build takes about 2 minutes because `buildSearchableOptions` launches a headless IDE.
