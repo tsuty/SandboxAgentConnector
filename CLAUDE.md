@@ -33,6 +33,8 @@ before touching ACP message handling, session restoration, or settings). Also us
 - `kotlinx-coroutines` is bundled by the IntelliJ Platform — never add it as a Gradle dependency.
 - There is a hand-written fake ACP agent at `tools/fake-acp-agent/switch_mode_agent.py` for exercising
   `switch_mode` permission flows without a real agent (see its README for how to point a connection at it).
+- Raising the version: follow `docs/development/RELEASE.md` — `pluginVersion` in `gradle.properties` and a new
+  `<change-notes>` section in `plugin.xml` go together in one commit, before the `v<version>` tag is pushed.
 
 ## Architecture
 
