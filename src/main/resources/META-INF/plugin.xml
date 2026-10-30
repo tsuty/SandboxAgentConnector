@@ -76,6 +76,12 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.0.3</h3>
+    <ul>
+        <li>Supported IDEs: 2025.3 (build 253) or later; 2024.2 to 2025.2 are no longer supported.</li>
+        <li>A new session starts with the <code>Mode</code>, <code>Model</code>, <code>Effort</code> and other selector
+            values last picked for its agent, when the agent still offers them. Restored sessions keep their own values.</li>
+    </ul>
     <h3>0.0.2</h3>
     <ul>
         <li>Several agents per project: the settings hold a list of enabled agents with one default, each with its own
