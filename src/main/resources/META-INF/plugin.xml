@@ -76,7 +76,21 @@
     ]]></description>
 
     <change-notes><![CDATA[
-    <h3>0.1.0</h3>
+    <h3>0.0.2</h3>
+    <ul>
+        <li>Several agents per project: the settings hold a list of enabled agents with one default, each with its own
+            color; settings of earlier versions are migrated from their single agent.</li>
+        <li>One agent per tab: open a tab with the default agent from <code>+</code>, or with any enabled agent from
+            its caret and the <code>New Sandbox Agent Tab</code> / <code>New Sandbox Agent Tab with Agent…</code> actions.</li>
+        <li>The tool window starts without tabs, on the ten most recently saved local sessions of every agent; closing
+            the last tab comes back to this list. The <code>restore last session</code> setting is removed.</li>
+        <li>Sessions open with the agent they belong to (read only when that agent is not enabled); session snapshots
+            record their agent and save time, and another agent's history is never overwritten.</li>
+        <li>The read-only message of the workspace lock names the agents running a turn.</li>
+        <li>Inline Markdown highlighting in the prompt field.</li>
+        <li>A visible divider between the chat log and the prompt, highlighted on hover and reset by double-click.</li>
+    </ul>
+    <h3>0.0.1</h3>
     <ul>
         <li>Initial release.</li>
         <li>ACP v1 (JSON-RPC 2.0 over stdio) client that attaches to an agent running in a sandbox
