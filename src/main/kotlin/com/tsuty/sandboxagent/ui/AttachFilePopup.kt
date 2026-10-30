@@ -87,7 +87,7 @@ class AttachFilePopupStep(
 
     override fun getIconFor(value: AttachItem): Icon = when (value) {
         is AttachItem.Search -> AllIcons.Actions.Search
-        is AttachItem.FileItem -> value.file.fileType.icon
+        is AttachItem.FileItem -> value.file.fileType.icon ?: AllIcons.FileTypes.Text
         is AttachItem.DirectoryItem -> AllIcons.Nodes.Folder
     }
 

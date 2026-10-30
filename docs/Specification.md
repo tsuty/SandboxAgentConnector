@@ -315,7 +315,7 @@ which is what makes the behaviour of a connection predictable.
 ### 6.1. Technologies & APIs (JetBrains SDK)
 * **Language**: Kotlin 2.4.x (JVM Toolchain 21)
 * **Build Tool**: Gradle (`org.jetbrains.intellij.platform` plugin 2.x)
-* **Target Platform**: IntelliJ IDEA Community 2024.2.5 baseline with `sinceBuild = 242`, no `untilBuild`. Verified against IC 2024.2.5 to 2025.2.6 using Plugin Verifier.
+* **Target Platform**: IntelliJ IDEA 2025.3.6.1 (IU) baseline with `sinceBuild = 253`, no `untilBuild`; support covers the IDE releases of the last year. Verified against IU 2025.3.6.1 and IU 2026.2.3 using Plugin Verifier.
 * **Dependencies**: `kotlinx-serialization-json` (JSON-RPC / ACP serialization, and the host ⇔ web transcript protocol), bundled plugin `org.intellij.plugins.markdown` (for `org.intellij.markdown` parser), bundled plugin `org.jetbrains.plugins.terminal` as an **optional** dependency (terminal login, see §3.2). `kotlinx-coroutines` utilizes the platform-bundled version without individual dependency declarations. The transcript itself needs no library: its HTML, CSS and JavaScript are bundled resources under `resources/transcript/`.
 * **Key JetBrains SDK Components**:
   * `ToolWindowFactory` / `ToolWindow`: Chat and control panel UI construction

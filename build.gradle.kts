@@ -36,16 +36,19 @@ dependencies {
     }
 
     testImplementation(kotlin("test"))
+    // The platform's JUnit 5 session listener (TestFrameworkType.Platform) needs JUnit 4's
+    // `junit.framework.TestCase`: without it no test starts on 2025.3 (NoClassDefFoundError).
+    testRuntimeOnly("junit:junit:4.13.2")
 }
 
 kotlin {
     jvmToolchain(providers.gradleProperty("javaVersion").get().toInt())
     compilerOptions {
-        // The Kotlin stdlib comes from the IDE at runtime (2.0 for 2024.2, see pluginSinceBuild):
+        // The Kotlin stdlib comes from the IDE at runtime (2.2.20 for 2025.3, see pluginSinceBuild):
         // newer API levels emit coroutine debug metadata it rejects ("Debug metadata version
         // mismatch"), which broke coroutine resumption in the tests once the platform's coroutines
         // debug agent is attached.
-        apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_0)
+        apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_2)
     }
 }
 
@@ -68,10 +71,11 @@ intellijPlatform {
             VerifyPluginTask.FailureLevel.OVERRIDE_ONLY_API_USAGES,
         )
         ides {
-            // Lower bound: matches platformVersion / pluginSinceBuild=242.
-            create("IC", "2024.2.5")
-            // Upper bound: latest release available from printProductsReleases.
-            create("IC", "2025.2.6")
+            // Lower bound: matches platformVersion / pluginSinceBuild=253. Support covers the IDE
+            // releases of the last year. IU: from 2026.1 on IntelliJ IDEA has no IC distribution.
+            create("IU", "2025.3.6.1")
+            // Upper bound: latest release.
+            create("IU", "2026.2.3")
         }
     }
 }

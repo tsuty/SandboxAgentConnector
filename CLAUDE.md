@@ -26,7 +26,7 @@ before touching ACP message handling, session restoration, or settings). Also us
 ./gradlew test --tests "com.tsuty.sandboxagent.acp.AcpClientTest.someTest" # single test method
 ./gradlew buildPlugin                # build the plugin zip -> build/distributions/SandboxAgentConnector-<version>.zip
 ./gradlew runIde                     # launch a sandbox IDE with the plugin installed, for manual testing
-./gradlew verifyPlugin               # plugin configuration + binary compatibility check (IC 2024.2.5–2025.2.6)
+./gradlew verifyPlugin               # plugin configuration + binary compatibility check (IU 2025.3.6.1, IU 2026.2.3)
 ```
 
 - JDK 21 is required to build (`kotlin { jvmToolchain(21) }`); the Gradle daemon JVM itself only needs 17+.

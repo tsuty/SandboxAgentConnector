@@ -84,7 +84,7 @@ object PromptAttachmentChips {
         return when {
             file == null -> AllIcons.FileTypes.Text
             file.isDirectory -> AllIcons.Nodes.Folder
-            else -> file.fileType.icon
+            else -> file.fileType.icon ?: AllIcons.FileTypes.Text
         }
     }
 }

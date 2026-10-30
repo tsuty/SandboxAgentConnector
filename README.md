@@ -20,7 +20,7 @@ While leveraging the IDE's lightweight nature and rich GUI (editor, Diff viewers
 
 ## Prerequisites
 
-- **Target IDEs**: JetBrains IDE 2024.2 (Build 242) or later, with the bundled Markdown plugin enabled (IntelliJ IDEA, GoLand, WebStorm, PyCharm, etc.)
+- **Target IDEs**: JetBrains IDE 2025.3 (Build 253) or later, with the bundled Markdown plugin enabled (IntelliJ IDEA, GoLand, WebStorm, PyCharm, etc.)
   - The plugin depends on `com.intellij.modules.platform` and `org.intellij.plugins.markdown`, so it cannot be enabled in IDEs where the Markdown plugin is missing or disabled. The bundled Terminal plugin (`org.jetbrains.plugins.terminal`) is an optional dependency used by `Open Sandbox Terminal`.
   - The transcript needs JCEF (a JetBrains Runtime with the embedded browser, `ide.browser.jcef.enabled`). Where JCEF is unavailable, a plain text fallback view is shown and permission requests cannot be answered there.
 - **JDK**: JDK 21 for building (`kotlin { jvmToolchain(21) }`; Gradle must be able to resolve a JDK 21 toolchain, while the JVM running Gradle itself only needs 17 or higher)

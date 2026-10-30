@@ -17,7 +17,7 @@ For detailed specifications and architecture, see [docs/Specification.md](docs/S
 
 ## Prerequisites / Environment
 
-- **Target IDEs**: JetBrains IDE 2024.2 (Build 242) or later, with the bundled Markdown plugin enabled.
+- **Target IDEs**: JetBrains IDE 2025.3 (Build 253) or later, with the bundled Markdown plugin enabled.
   - The plugin depends on `com.intellij.modules.platform` and `org.intellij.plugins.markdown`, so it cannot be
     enabled in IDEs where the Markdown plugin is missing or disabled.
   - `org.jetbrains.plugins.terminal` is an optional dependency, used by `Open Sandbox Terminal`.

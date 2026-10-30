@@ -12,7 +12,7 @@ Publishing and signing for JetBrains Marketplace (`publishPlugin` / `signPlugin`
 |---|---|
 | JDK | JDK 21 (`javaVersion=21` in `../../gradle.properties` is applied via `kotlin { jvmToolchain(21) }`). Gradle must be able to resolve a JDK 21 toolchain (the JVM that runs Gradle itself only needs 17 or higher) |
 | Build Tool | Bundled Gradle Wrapper (`./gradlew`) |
-| Target IDE | JetBrains IDE with build number `242` (2024.2 branch) or later, with the Markdown plugin enabled (IntelliJ IDEA, GoLand, WebStorm, PyCharm, etc.) |
+| Target IDE | JetBrains IDE with build number `253` (2025.3 branch) or later, with the Markdown plugin enabled (IntelliJ IDEA, GoLand, WebStorm, PyCharm, etc.) |
 | Network | Required during the initial build to download the IntelliJ Platform and dependencies |
 
 The plugin declares two mandatory dependencies (`com.intellij.modules.platform` and `org.intellij.plugins.markdown`) and one optional dependency (`org.jetbrains.plugins.terminal`).
@@ -61,7 +61,7 @@ SandboxAgentConnector/lib/SandboxAgentConnector-0.1.0-searchableOptions.jar
 ```
 
 The report from `verifyPlugin` will be generated at `build/reports/pluginVerifier/<IDE build number>/report.html`.
-Verification targets are explicitly configured in `../../build.gradle.kts` under `pluginVerification { ides { ... } }` (the baseline IntelliJ IDEA Community 2024.2.5 and the latest existing 2025.2.6).
+Verification targets are explicitly configured in `../../build.gradle.kts` under `pluginVerification { ides { ... } }` (the baseline IntelliJ IDEA 2025.3.6.1 and the latest release 2026.2.3, both as IU).
 As of version 0.1.0, there are **0 compatibility issues (Compatible)** for both IDEs.
 
 ---
@@ -118,11 +118,12 @@ Perform only steps 1 to 3 above. Configuration values (`SandboxAgentSettingsStat
 
 ## 6. Compatibility Policy
 
-- `pluginSinceBuild=242` — Can be installed on IDE build `242` (2024.2 branch) and later.
+- `pluginSinceBuild=253` — Can be installed on IDE build `253` (2025.3 branch) and later.
+  Support covers the IDE releases of the last year: when a release line turns one year old, `pluginSinceBuild`, `platformVersion`, the lower bound of the verification targets and Kotlin `apiVersion` (the Kotlin bundled with that IDE) move up together.
 - `until-build` is **intentionally not specified**.
   This ensures future IDE builds will not reject the plugin as "incompatible" and can be installed directly.
-- The build platform is fixed to `platformVersion=2024.2.5` (`IC`).
-  We prioritize compatibility with older IDEs and mechanically check for missing APIs in newer IDEs using Plugin Verifier.
+- The build platform is fixed to `platformVersion=2025.3.6.1` (`IU`; IntelliJ IDEA has no IC distribution from 2026.1 on).
+  It is the oldest supported IDE, and we mechanically check for missing APIs in newer IDEs using Plugin Verifier.
 - The mandatory dependencies are `com.intellij.modules.platform` and `org.intellij.plugins.markdown`, which are bundled with most IDEs.
   Therefore the plugin can be installed not only on IntelliJ IDEA, but also on GoLand, WebStorm, PyCharm, etc. — as long as the Markdown plugin is present and enabled.
 - The optional dependency `org.jetbrains.plugins.terminal` is used to provide the sandbox terminal feature within the IDE.
@@ -133,8 +134,8 @@ Perform only steps 1 to 3 above. Configuration values (`SandboxAgentSettingsStat
 
 ### "Plugin is incompatible" is displayed
 
-- The target IDE build number may be older than `242`.
-  Check your build number under `Help → About`. Versions `241.x` and earlier are not supported.
+- The target IDE build number may be older than `253`.
+  Check your build number under `Help → About`. Versions `252.x` and earlier are not supported.
 - Check whether an extracted directory or a standalone JAR was selected instead of the ZIP file.
   Make sure to select `SandboxAgentConnector-<version>.zip`.
 
@@ -147,34 +148,11 @@ Perform only steps 1 to 3 above. Configuration values (`SandboxAgentSettingsStat
 
 ### Kotlin stdlib Exceptions (`NoSuchMethodError` / `ClassNotFoundException`, etc.)
 
-This plugin **intentionally bundles the Kotlin standard library**
-(`verifyPluginProjectConfiguration` reports this as a warning, but it is accepted as policy).
-If runtime exceptions occur due to conflicts with the IDE's bundled Kotlin stdlib, you can avoid them by rebuilding without bundling it.
-
-Add the following to `../../gradle.properties`:
-
-```properties
-kotlin.stdlib.default.dependency=false
-```
-
-Then perform a clean build:
-
-```bash
-./gradlew clean buildPlugin
-```
-
-Verify that `kotlin-stdlib-*.jar` is not included in `lib/` of the generated ZIP, then uninstall and reinstall the plugin.
-
-Note that the official documentation (*Kotlin for Plugin Development*) recommends pinning `apiVersion` to the Kotlin version bundled with the target IDE.
-It is currently not set, so consider adding something like the following to `../../build.gradle.kts` if needed:
-
-```kotlin
-kotlin {
-    compilerOptions {
-        apiVersion = org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_9
-    }
-}
-```
+The plugin does not bundle the Kotlin standard library: it uses the one bundled with the IDE
+(`kotlin-stdlib-*.jar` must not appear in `lib/` of the generated ZIP).
+`../../build.gradle.kts` pins `apiVersion` to the Kotlin version bundled with the oldest supported IDE
+(`KOTLIN_2_2`: 2025.3 ships Kotlin 2.2.20), as the official documentation (*Kotlin for Plugin Development*) recommends.
+An exception like this therefore usually means `apiVersion` is newer than the Kotlin bundled with the IDE; keep it in step with `pluginSinceBuild`.
 
 ### Nothing happens after installation / Error dialog appears at startup
 
@@ -208,7 +186,7 @@ Follow and check off each item below in order:
 
 - [ ] `./gradlew clean buildPlugin` finishes with `BUILD SUCCESSFUL`
 - [ ] `../../build/distributions/SandboxAgentConnector-0.1.0.zip` exists
-- [ ] Target IDE's build number in `Help → About` is `242` or later
+- [ ] Target IDE's build number in `Help → About` is `253` or later
 - [ ] The `Markdown` plugin is enabled under `Settings → Plugins` in the target IDE
 - [ ] Successfully selected the ZIP via `Settings → Plugins → ⚙ → Install Plugin from Disk...`
 - [ ] Clicked `Restart IDE` and the IDE restarted normally

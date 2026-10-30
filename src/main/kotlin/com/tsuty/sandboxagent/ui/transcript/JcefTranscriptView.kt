@@ -272,6 +272,8 @@ class JcefTranscriptView(
         override fun onRenderProcessTerminated(
             cefBrowser: CefBrowser?,
             status: CefRequestHandler.TerminationStatus?,
+            errorCode: Int,
+            errorString: String?,
         ) {
             onEdt { recover() }
         }
