@@ -118,6 +118,7 @@
         <projectService serviceImplementation="com.tsuty.sandboxagent.service.SandboxAgentService"/>
         <projectService serviceImplementation="com.tsuty.sandboxagent.session.SessionMetadataStore"/>
         <projectService serviceImplementation="com.tsuty.sandboxagent.session.SessionLockRegistry"/>
+        <projectService serviceImplementation="com.tsuty.sandboxagent.session.LastSelectorsStore"/>
         <projectService serviceImplementation="com.tsuty.sandboxagent.vfs.AgentWorkspaceGuard"/>
 
         <!-- Locks the workspace in the IDE while the agent runs a turn; the sandbox keeps writing. -->

@@ -60,6 +60,7 @@ import com.tsuty.sandboxagent.acp.key
 import com.tsuty.sandboxagent.acp.plainText
 import com.tsuty.sandboxagent.acp.promptAttachments
 import com.tsuty.sandboxagent.acp.userPromptText
+import com.tsuty.sandboxagent.session.LastSelectorsStore
 import com.tsuty.sandboxagent.session.LocalSessionFile
 import com.tsuty.sandboxagent.session.LocalSessionIndex
 import com.tsuty.sandboxagent.session.SaveResult
@@ -738,12 +739,14 @@ class SandboxAgentService(
         // fails if another owner raced us with a `session/load` of the very same id in between.
         tryAcquireLock(created.sessionId)
         selectorsRef.set(SessionSelectors(created.models, created.modes, created.configOptions))
+        val selectors = applyLastSelectors(acpClient, created.sessionId)
+            ?: SessionSelectors(created.models, created.modes, created.configOptions)
         publish(
             SandboxAgentEvent.SessionEstablished(
                 sessionId = created.sessionId,
-                models = created.models,
-                modes = created.modes,
-                configOptions = created.configOptions,
+                models = selectors.models,
+                modes = selectors.modes,
+                configOptions = selectors.configOptions,
                 restored = false,
                 agentCapabilities = agentCapabilities,
             ),
@@ -1376,51 +1379,99 @@ class SandboxAgentService(
     fun respondToPermission(request: PermissionRequest, option: PermissionOption): Boolean =
         request.resolve(option)
 
-    fun selectMode(modeId: String): Job = scope.launch {
-        val acpClient = client ?: return@launch
-        val sessionId = sessionIdRef.get() ?: return@launch
-        try {
-            val modeBeforeRequest = selectorsRef.get()?.modes?.currentModeId
-            val reported = acpClient.setMode(sessionId, modeId).modes
-            val merged = mergeSelectors { it.withRequestedMode(modeId, reported, modeBeforeRequest) }
-            if (reported != null) publish(merged.toEvent())
-            publish(SandboxAgentEvent.ModeChanged(merged.modes?.currentModeId ?: modeId))
-        } catch (e: Exception) {
-            publish(SandboxAgentEvent.Error(e.message ?: "session/set_mode failed", e))
-        }
-    }
+    fun selectMode(modeId: String): Job = select(SelectorChange.Mode(modeId), "session/set_mode")
 
-    fun selectModel(modelId: String): Job = scope.launch {
-        val acpClient = client ?: return@launch
-        val sessionId = sessionIdRef.get() ?: return@launch
-        try {
-            val reported = acpClient.setModel(sessionId, modelId).models
-            val merged = mergeSelectors { it.withModels(reported).withCurrentModel(modelId) }
-            if (reported != null) publish(merged.toEvent())
-            publish(SandboxAgentEvent.ModelChanged(reported?.currentModelId ?: modelId))
-        } catch (e: Exception) {
-            publish(SandboxAgentEvent.Error(e.message ?: "session/set_model failed", e))
-        }
-    }
+    fun selectModel(modelId: String): Job = select(SelectorChange.Model(modelId), "session/set_model")
 
     /**
      * Applies a generic `configOptions` selector (`session/set_config_option`). Agents that report
      * the model this way do not implement `session/set_model`.
      */
-    fun setConfigOption(configId: String, value: String): Job = scope.launch {
+    fun setConfigOption(configId: String, value: String): Job =
+        select(SelectorChange.ConfigOption(configId, value), "session/set_config_option")
+
+    /**
+     * Applies a selector the user picked, and remembers the value that took effect for the next
+     * new session of this agent (see [applyLastSelectors]).
+     */
+    private fun select(change: SelectorChange, method: String): Job = scope.launch {
         val acpClient = client ?: return@launch
         val sessionId = sessionIdRef.get() ?: return@launch
         try {
+            val applied = requestChange(acpClient, sessionId, change, publishResult = true)
+            lastSelectorsStore()?.let { store -> agentId?.let { store.remember(it, applied.key, applied.value) } }
+        } catch (e: Exception) {
+            publish(SandboxAgentEvent.Error(e.message ?: "$method failed", e))
+        }
+    }
+
+    /**
+     * Sends [change] and folds the answer into the cached selectors; returns the change that took
+     * effect, which may differ from the requested one. [publishResult] `= false` leaves the UI to
+     * whoever publishes the whole state afterwards (see [applyLastSelectors]).
+     */
+    private suspend fun requestChange(
+        acpClient: AcpClient,
+        sessionId: String,
+        change: SelectorChange,
+        publishResult: Boolean,
+    ): SelectorChange = when (change) {
+        is SelectorChange.Mode -> {
+            val modeBeforeRequest = selectorsRef.get()?.modes?.currentModeId
+            val reported = acpClient.setMode(sessionId, change.value).modes
+            val merged = mergeSelectors { it.withRequestedMode(change.value, reported, modeBeforeRequest) }
+            val effective = merged.modes?.currentModeId ?: change.value
+            if (publishResult) {
+                if (reported != null) publish(merged.toEvent())
+                publish(SandboxAgentEvent.ModeChanged(effective))
+            }
+            SelectorChange.Mode(effective)
+        }
+        is SelectorChange.Model -> {
+            val reported = acpClient.setModel(sessionId, change.value).models
+            val merged = mergeSelectors { it.withModels(reported).withCurrentModel(change.value) }
+            val effective = reported?.currentModelId ?: change.value
+            if (publishResult) {
+                if (reported != null) publish(merged.toEvent())
+                publish(SandboxAgentEvent.ModelChanged(effective))
+            }
+            SelectorChange.Model(effective)
+        }
+        is SelectorChange.ConfigOption -> {
             // The agent may reject or coerce the value (`auto` → `acceptEdits`), so the answered
             // state — not `value` — is what the selectors are refreshed from.
-            val reported = acpClient.setConfigOption(sessionId, configId, value).configOptions
-            if (reported.none { it.id == configId }) {
+            val reported = acpClient.setConfigOption(sessionId, change.configId, change.value).configOptions
+            val answered = reported.firstOrNull { it.id == change.configId }
+            if (answered == null) {
                 // Nothing says whether the change took effect: the selector keeps showing `value`.
-                log.debug("session/set_config_option did not report '$configId' back; assuming '$value' took effect")
+                log.debug("session/set_config_option did not report '${change.configId}' back; assuming '${change.value}' took effect")
             }
-            applyConfigOptions(reported, replace = false)
-        } catch (e: Exception) {
-            publish(SandboxAgentEvent.Error(e.message ?: "session/set_config_option failed", e))
+            if (publishResult) applyConfigOptions(reported, replace = false) else mergeConfigOptions(reported, replace = false)
+            change.copy(value = answered?.currentValue ?: change.value)
+        }
+    }
+
+    /**
+     * Sets the selectors of the brand new session [sessionId] to the values last picked for this
+     * agent, as far as the session offers them; returns the state that results. Nothing is
+     * published on the way: the caller announces the session with the final state, so the action
+     * bar never shows the defaults first. A value the agent refuses is left at its default — the
+     * session works anyway, so it is only logged.
+     */
+    private suspend fun applyLastSelectors(acpClient: AcpClient, sessionId: String): SessionSelectors? {
+        val id = agentId ?: return selectorsRef.get()
+        val remembered = lastSelectorsStore()?.lastSelectors(id).orEmpty()
+        val attempted = mutableSetOf<String>()
+        while (true) {
+            val selectors = selectorsRef.get() ?: return null
+            val change = selectors.nextRememberedChange(remembered, attempted) ?: return selectors
+            attempted += change.key
+            try {
+                requestChange(acpClient, sessionId, change, publishResult = false)
+                log.info("Restored the last ${change.key} of $id: ${change.value}")
+            } catch (e: Exception) {
+                log.info("Could not restore the last ${change.key} of $id (${change.value})", e)
+            }
         }
     }
 
@@ -1429,9 +1480,14 @@ class SandboxAgentService(
      * tells a whole state from a partial answer (see [SessionSelectors.withConfigOptions]).
      */
     private fun applyConfigOptions(reported: List<SessionConfigOption>, replace: Boolean) {
-        if (reported.isEmpty()) return
-        val merged = mergeSelectors { it.withConfigOptions(reported, replace) }
+        val merged = mergeConfigOptions(reported, replace) ?: return
         publish(SandboxAgentEvent.ConfigOptionsChanged(merged.configOptions))
+    }
+
+    /** The cache half of [applyConfigOptions]; `null` when there was nothing to fold in. */
+    private fun mergeConfigOptions(reported: List<SessionConfigOption>, replace: Boolean): SessionSelectors? {
+        if (reported.isEmpty()) return null
+        return mergeSelectors { it.withConfigOptions(reported, replace) }
     }
 
     /**
@@ -1681,6 +1737,10 @@ class SandboxAgentService(
 
     private fun settingsOrNull(): SandboxAgentSettingsState? =
         runCatching { SandboxAgentSettingsState.getInstance(project) }.getOrNull()
+
+    /** `null` when the project service is unavailable (light tests): nothing is remembered then. */
+    private fun lastSelectorsStore(): LastSelectorsStore? =
+        runCatching { LastSelectorsStore.getInstance(project) }.getOrNull()
 
     /** `null` when the project service is unavailable (light tests), which disables rename/touch. */
     private fun metadataStore(): SessionMetadataStore? =
