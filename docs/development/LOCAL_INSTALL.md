@@ -156,7 +156,7 @@ An exception like this therefore usually means `apiVersion` is newer than the Ko
 
 Check `idea.log`. The fastest way to open it from the IDE is `Help → Show Log in Finder/Explorer` (or `Help → Collect Logs and Diagnostic Data`).
 
-Example paths (`<Product>` refers to the product directory such as `IntelliJIdea2025.2`):
+Example paths (`<Product>` refers to the product directory such as `IntelliJIdea2025.3`):
 
 | OS | Path |
 |---|---|
