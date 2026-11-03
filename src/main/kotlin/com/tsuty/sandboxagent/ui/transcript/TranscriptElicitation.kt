@@ -10,14 +10,16 @@ import kotlinx.serialization.json.JsonPrimitive
 object TranscriptElicitation {
 
     fun event(id: String, form: ElicitationForm): ElicitationEvent =
-        ElicitationEvent(id, form.message, form.fields.map(::field))
+        ElicitationEvent(id, form.message, form.fields.map(::field), TranscriptHtml.renderQuestion(form.message))
 
     private fun field(field: ElicitationField): TranscriptElicitationField {
         val base = TranscriptElicitationField(
             key = field.key,
             kind = "",
-            title = field.title,
+            title = TranscriptHtml.plainText(field.title),
             description = field.description,
+            titleHtml = TranscriptHtml.renderQuestionInline(field.title),
+            descriptionHtml = field.description?.let(TranscriptHtml::renderQuestion).orEmpty(),
             required = field.required,
         )
         return when (field) {
@@ -56,6 +58,13 @@ object TranscriptElicitation {
         }
     }
 
-    private fun option(option: ElicitationOption) =
-        TranscriptElicitationOption(option.value, option.title, option.description, option.preview)
+    private fun option(option: ElicitationOption) = TranscriptElicitationOption(
+        value = option.value,
+        title = TranscriptHtml.plainText(option.title),
+        description = option.description,
+        preview = option.preview,
+        titleHtml = TranscriptHtml.renderQuestionInline(option.title),
+        descriptionHtml = option.description?.let(TranscriptHtml::renderQuestion).orEmpty(),
+        previewHtml = option.preview?.let(TranscriptHtml::renderQuestion).orEmpty(),
+    )
 }

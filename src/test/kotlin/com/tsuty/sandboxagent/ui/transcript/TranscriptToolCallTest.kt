@@ -43,8 +43,8 @@ class TranscriptToolCallTest {
             kind = ToolKind.OTHER,
             status = ToolCallStatus.COMPLETED,
             rawInput = Json.parseToJsonElement(
-                """{"questions":[{"header":"Language","question":"Which?","multiSelect":true,"options":[
-                    {"label":"Kotlin","description":"JVM","preview":"fun main() {}"},{"label":"Rust"}]}]}""",
+                """{"questions":[{"header":"Language","question":"Which **one**?","multiSelect":true,"options":[
+                    {"label":"`Kotlin`","description":"*JVM*","preview":"fun main() {}"},{"label":"Rust"}]}]}""",
             ),
         )
 
@@ -55,8 +55,13 @@ class TranscriptToolCallTest {
         val question = questions.questions.single()
         assertEquals("Language", question.header)
         assertTrue(question.multiSelect)
-        assertEquals(listOf("Kotlin", "Rust"), question.options.map { it.label })
-        assertEquals("JVM", question.options[0].description)
+        assertEquals(listOf("`Kotlin`", "Rust"), question.options.map { it.label })
+        assertEquals("*JVM*", question.options[0].description)
+        // The question, the labels and the descriptions are the agent's Markdown, rendered.
+        assertEquals("<p>Which <strong>one</strong>?</p>", question.questionHtml)
+        assertEquals("<code>Kotlin</code>", question.options[0].labelHtml)
+        assertEquals("<p><em>JVM</em></p>", question.options[0].descriptionHtml)
+        assertEquals("<p>fun main() {}</p>", question.options[0].previewHtml)
         assertEquals("fun main() {}", question.options[0].preview)
         // The raw input is the plumbing of the call: it is not dumped next to the questions.
         assertEquals("", event.bodyHtml)

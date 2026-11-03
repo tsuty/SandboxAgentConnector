@@ -72,6 +72,26 @@ object TranscriptHtml {
         return Body(html, choices)
     }
 
+    /**
+     * [render] for the text an agent asks the user with (a form, the questions of an ask call).
+     *
+     * Links keep their text but are never clickable: ACP asks a client not to render a URL as
+     * clickable anywhere in an elicitation but the `url` field of URL mode, where it is consented to
+     * first. A bare URL GFM would turn into a link stays text as well.
+     */
+    fun renderQuestion(markdown: String): String = render(markdown).replace(LINK_TAG, "")
+
+    /**
+     * [renderQuestion] for one line of it — a field title, an option label: the paragraph a single
+     * line is wrapped in is dropped, so the fragment sits inside a label. Text that renders to more
+     * than one block keeps its blocks.
+     */
+    fun renderQuestionInline(markdown: String): String {
+        val html = renderQuestion(markdown)
+        val inner = html.removeSurrounding("<p>", "</p>")
+        return if (inner != html && !inner.contains("<p>")) inner else html
+    }
+
     /** Renders one line of plain text (a notice, the reason a turn ended) as an escaped fragment. */
     fun text(text: String): String = escape(text)
 
@@ -239,6 +259,9 @@ object TranscriptHtml {
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
         .replace("&amp;", "&")
+
+    /** The opening and closing tags of a link, as [sanitize] writes them. */
+    private val LINK_TAG = Regex("""</?a(?:\s[^>]*)?>""")
 
     private val EMPHASIS = Regex("""\*\*|__|`|\*|(?<!\w)_|_(?!\w)""")
 

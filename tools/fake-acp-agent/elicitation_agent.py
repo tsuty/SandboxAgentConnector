@@ -123,6 +123,21 @@ ASK_QUESTIONS = {
         ask_question("Checks", "Which checks should I run?", True, CHECKS),
     ],
     "ask-preview": [RUST_ERRORS],
+    # What a model actually writes: Markdown in the question, the labels, the descriptions and the
+    # previews, including a link that must stay plain text.
+    "ask-markdown": [
+        ask_question("**Errors**", "How should `read_config` report a **missing file**? See [the book](https://doc.rust-lang.org/book/).", False, [
+            ask_option("`Result` with `?`", "Propagate it: *short*, and the caller decides.",
+                       "```rust\nfn read_config(path: &str) -> io::Result<String> {\n    fs::read_to_string(path)\n}\n```"),
+            ask_option("**Default** value", "Fall back to `Config::default()`; see https://example.com/defaults.",
+                       "+------------------+\n| config.toml      |\n|   (missing)      |\n+--------+---------+\n         v\n  Config::default()"),
+            ask_option("Panic", "~~Never~~ only in tests."),
+        ]),
+        ask_question("Checks", "Which checks should I run?\n\n- fast ones first\n- **slow** ones last", True, [
+            ask_option("`cargo test`", "Unit tests"),
+            ask_option("`cargo clippy`", "Lints, with `-D warnings`"),
+        ]),
+    ],
 }
 
 
@@ -232,6 +247,7 @@ SCENARIOS = {
     "ask-multi": lambda: ask_form(ASK_QUESTIONS["ask-multi"]),
     "ask-many": lambda: ask_form(ASK_QUESTIONS["ask-many"]),
     "ask-preview": lambda: ask_form(ASK_QUESTIONS["ask-preview"]),
+    "ask-markdown": lambda: ask_form(ASK_QUESTIONS["ask-markdown"]),
     # Only the record of the call, as a restored session replays it: nothing is asked.
     "ask-record": lambda: ask_form(ASK_QUESTIONS["ask-many"]),
     # The call is first reported with an empty input, which only arrives in full afterwards.

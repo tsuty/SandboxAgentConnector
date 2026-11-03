@@ -439,18 +439,19 @@
     function askQuestion(question) {
         var node = el('div', 'ask-question');
         if (question.header) node.appendChild(el('span', 'ask-chip', question.header));
-        node.appendChild(el('div', 'ask-text', question.question));
+        node.appendChild(questionText('div', 'ask-text markdown', question.questionHtml, question.question));
         node.appendChild(el('div', 'ask-hint', question.multiSelect ? 'Select one or more' : 'Select one'));
         var list = el('div', 'ask-options');
         (question.options || []).forEach(function (option) {
             var row = el('div', 'ask-option' + (question.multiSelect ? ' ask-option--multi' : ''));
             row.appendChild(el('span', 'ask-mark'));
             var text = el('div', 'ask-option-text');
-            text.appendChild(el('div', 'ask-label', option.label));
-            if (option.description) text.appendChild(el('div', 'elicitation-description', option.description));
+            text.appendChild(questionText('div', 'ask-label', option.labelHtml, option.label));
+            if (option.description) {
+                text.appendChild(questionText('div', 'elicitation-description markdown', option.descriptionHtml, option.description));
+            }
             if (option.preview) {
-                var preview = el('pre', 'elicitation-preview');
-                preview.textContent = option.preview;
+                var preview = questionText('div', 'elicitation-preview markdown', option.previewHtml, option.preview);
                 preview.hidden = true;
                 text.appendChild(anchor('Preview', preview));
                 text.appendChild(preview);
@@ -600,6 +601,17 @@
 
     // ---------------------------------------------------------------- elicitation
 
+    /**
+     * Text the agent asks the user with, which is Markdown. The host renders and sanitizes it
+     * (`TranscriptHtml.renderQuestion`, links already reduced to their text), so it is set as HTML;
+     * a host that sends no HTML gets the plain text instead.
+     */
+    function questionText(tag, className, html, text) {
+        var node = el(tag, className);
+        if (html) node.innerHTML = html; else node.textContent = text || '';
+        return node;
+    }
+
     /** Selects with more options than this are drawn as a drop down instead of a column of radios. */
     var MAX_RADIOS = 6;
     var EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -616,7 +628,7 @@
     function addElicitation(event) {
         var node = el('div', 'entry block block--permission framed');
         node.appendChild(el('div', 'elicitation-source', ROLES.agent.title + ' asks'));
-        if (event.message) node.appendChild(el('div', 'permission-headline', event.message));
+        if (event.message) node.appendChild(questionText('div', 'permission-headline markdown', event.messageHtml, event.message));
 
         var form = el('form', 'elicitation-form');
         form.noValidate = true;
@@ -685,7 +697,12 @@
         error.hidden = true;
         var read;
         var focus;
-        var title = field.title + (field.required ? ' *' : '');
+        /** The title of the field, then the mark of a required one. */
+        function title(tag, className) {
+            var node = questionText(tag, className, field.titleHtml, field.title);
+            if (field.required) node.appendChild(document.createTextNode(' *'));
+            return node;
+        }
 
         if (field.kind === 'boolean') {
             var label = el('label', 'choice');
@@ -693,14 +710,16 @@
             box.type = 'checkbox';
             box.checked = field['default'] === true;
             label.appendChild(box);
-            label.appendChild(el('span', null, title));
+            label.appendChild(title('span', null));
             row.appendChild(label);
             read = function () { return {value: box.checked}; };
             focus = function () { box.focus(); };
         } else {
-            row.appendChild(el('div', 'elicitation-label', title));
+            row.appendChild(title('div', 'elicitation-label'));
         }
-        if (field.description) row.appendChild(el('div', 'elicitation-description', field.description));
+        if (field.description) {
+            row.appendChild(questionText('div', 'elicitation-description markdown', field.descriptionHtml, field.description));
+        }
 
         if (field.kind === 'text' || field.kind === 'number') {
             var input = el('input', 'elicitation-input');
@@ -795,19 +814,23 @@
 
     /**
      * The monospace box under a single select that shows the `preview` of the selected option
-     * (a code snippet or a mockup the agent attached). It is text only, set with `textContent`,
-     * and it stays hidden while the selected option has none.
+     * (a code snippet or a mockup the agent attached). The preview is Markdown, rendered by the
+     * host, and the box keeps the whitespace of its lines, so a mockup keeps its shape. It stays
+     * hidden while the selected option has none.
      */
     function previewBox(row, options) {
-        var box = el('pre', 'elicitation-preview');
+        var box = el('div', 'elicitation-preview markdown');
         box.hidden = true;
         row.appendChild(box);
         return {
             show: function (value) {
                 var match = (options || []).filter(function (option) { return option.value === value; })[0];
-                var text = match && match.preview;
-                box.textContent = text || '';
-                box.hidden = !text;
+                var preview = match && match.preview;
+                box.textContent = '';
+                if (preview) {
+                    if (match.previewHtml) box.innerHTML = match.previewHtml; else box.textContent = preview;
+                }
+                box.hidden = !preview;
             }
         };
     }
@@ -817,8 +840,10 @@
         var label = el('label', 'choice');
         label.appendChild(input);
         var text = el('span', 'choice-text');
-        text.appendChild(el('span', null, option.title));
-        if (option.description) text.appendChild(el('span', 'elicitation-description', option.description));
+        text.appendChild(questionText('span', null, option.titleHtml, option.title));
+        if (option.description) {
+            text.appendChild(questionText('div', 'elicitation-description markdown', option.descriptionHtml, option.description));
+        }
         label.appendChild(text);
         return label;
     }

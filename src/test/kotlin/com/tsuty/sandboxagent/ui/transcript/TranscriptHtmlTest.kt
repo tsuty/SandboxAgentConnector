@@ -136,4 +136,33 @@ class TranscriptHtmlTest {
         assertTrue(html.contains("""type="checkbox""""), html)
         assertTrue(html.contains("disabled"), html)
     }
+
+    @Test
+    fun `the markdown of a question is rendered but its links are not clickable`() {
+        val html = TranscriptHtml.renderQuestion(
+            "Use **this** for `read_config`? See https://example.com and [the book](https://example.com/book).",
+        )
+
+        assertTrue(html.contains("<strong>this</strong>"), html)
+        assertTrue(html.contains("<code>read_config</code>"), html)
+        assertTrue(!html.contains("<a"), html)
+        assertTrue(html.contains("https://example.com and the book."), html)
+    }
+
+    @Test
+    fun `a preview keeps its lines and its fences`() {
+        val html = TranscriptHtml.renderQuestion("fn a() {\n  b()\n}\n\n```rust\nfn c() {}\n```")
+
+        // The line breaks and the indentation stay in the text, for the box to show them as written.
+        assertTrue(html.contains("fn a() {\n  b()\n}"), html)
+        assertTrue(html.contains("<pre><code"), html)
+    }
+
+    @Test
+    fun `one line of a question loses the paragraph it is wrapped in`() {
+        assertEquals("<code>?</code> operator", TranscriptHtml.renderQuestionInline("`?` operator"))
+        // Two blocks stay two blocks: there is no single line to unwrap.
+        assertEquals(TranscriptHtml.renderQuestion("a\n\nb"), TranscriptHtml.renderQuestionInline("a\n\nb"))
+        assertEquals("", TranscriptHtml.renderQuestionInline(""))
+    }
 }

@@ -39,13 +39,24 @@ object TranscriptToolCall {
             },
             question = ask?.let { entry ->
                 TranscriptQuestions(
-                    headline = entry.headline,
+                    // The folded row is plain text: the emphasis markers of the agent are left out.
+                    headline = TranscriptHtml.plainText(entry.headline),
                     questions = entry.questions.map { question ->
                         TranscriptQuestion(
-                            header = question.header,
+                            header = question.header?.let(TranscriptHtml::plainText),
                             question = question.question,
                             multiSelect = question.multiSelect,
-                            options = question.options.map { TranscriptQuestionOption(it.label, it.description, it.preview) },
+                            options = question.options.map { option ->
+                                TranscriptQuestionOption(
+                                    label = option.label,
+                                    description = option.description,
+                                    preview = option.preview,
+                                    labelHtml = TranscriptHtml.renderQuestionInline(option.label),
+                                    descriptionHtml = option.description?.let(TranscriptHtml::renderQuestion).orEmpty(),
+                                    previewHtml = option.preview?.let(TranscriptHtml::renderQuestion).orEmpty(),
+                                )
+                            },
+                            questionHtml = TranscriptHtml.renderQuestion(question.question),
                         )
                     },
                 )

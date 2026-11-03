@@ -38,6 +38,7 @@ class TranscriptElicitationTest {
         assertTrue(byKey.getValue("pick").required)
         assertEquals(JsonPrimitive("b"), byKey.getValue("pick").default)
         assertEquals("first", byKey.getValue("pick").options[0].description)
+        assertEquals("first", byKey.getValue("pick").options[0].descriptionHtml.removeSurrounding("<p>", "</p>"))
         assertEquals("fn a() {}", byKey.getValue("pick").options[0].preview)
         assertNull(byKey.getValue("pick").options[1].preview)
         assertEquals("multi", byKey.getValue("many").kind)
@@ -47,6 +48,34 @@ class TranscriptElicitationTest {
         assertEquals(1.0, byKey.getValue("n").minimum)
         assertEquals(JsonPrimitive(true), byKey.getValue("ok").default)
         assertEquals(5, byKey.getValue("t").maxLength)
+    }
+
+    @Test
+    fun `the markdown of a form is rendered for the document`() {
+        val markdown = ElicitationForm.parse(
+            Json.parseToJsonElement(
+                """
+                {"mode":"form","message":"Pick **one** of [these](https://example.com)","requestedSchema":{"type":"object","properties":{
+                  "q":{"type":"string","title":"The `?` operator","description":"*Quick*","oneOf":[
+                    {"const":"a","title":"`a`","description":"**A**","_meta":{"_claude/askUserQuestionOption":{"preview":"```kotlin\nfun a() {}\n```"}}}
+                  ]}
+                }}}
+                """,
+            ).jsonObject,
+        )
+
+        val event = TranscriptElicitation.event("req-2", markdown)
+        val field = event.fields.single()
+        val option = field.options.single()
+
+        assertEquals("<p>Pick <strong>one</strong> of these</p>", event.messageHtml)
+        assertEquals("The <code>?</code> operator", field.titleHtml)
+        // Plain text where markup cannot go (a drop down entry): the markers are left out.
+        assertEquals("The ? operator", field.title)
+        assertEquals("<p><em>Quick</em></p>", field.descriptionHtml)
+        assertEquals("<code>a</code>", option.titleHtml)
+        assertEquals("<p><strong>A</strong></p>", option.descriptionHtml)
+        assertTrue(option.previewHtml.contains("<pre><code"), option.previewHtml)
     }
 
     @Test

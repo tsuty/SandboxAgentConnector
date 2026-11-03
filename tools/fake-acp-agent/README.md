@@ -63,6 +63,7 @@ JSON, so what the card sent can be read next to the card.
 | Scenario | What to check |
 | --- | --- |
 | `ask-single`, `ask-multi`, `ask-many` | The shapes `claude-agent-acp` builds from `AskUserQuestion`: radios with option descriptions, check boxes, one "Other" field per question. Several questions share one card and the generic message, and a dotted rule separates one question from the next (an "Other" field stays with its question). |
+| `ask-markdown` | Markdown everywhere a model puts it: bold and code in the question, the header, the labels and the descriptions, a list in a question, a fenced preview and an unfenced ASCII mockup. Everything is rendered (the mockup keeps its shape), and the two links stay plain text, not clickable, in the form and in the record of the call. |
 | `ask-record` | Only the record of the call, as a restored session replays it, with no form: a folded "Asked 2 questions" row in the `Worked` group that unfolds to the questions, the options and their descriptions, with nothing to answer. |
 | `ask-late` | The call is first reported with an empty input and completes it afterwards: its row starts as an ordinary call and, once the input is complete, reads "Asked 2 questions" and unfolds to the questions. |
 | `ask-preview` | Options carrying a `preview` under `_meta["_claude/askUserQuestionOption"]`: selecting an option shows its preview in a monospace box under the radios (scrollable, text only), and the last option has none, which hides the box. |

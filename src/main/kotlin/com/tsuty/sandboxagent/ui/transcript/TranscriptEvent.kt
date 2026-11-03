@@ -172,6 +172,10 @@ data class TranscriptQuestionOption(
     val label: String,
     val description: String? = null,
     val preview: String? = null,
+    /** The agent's Markdown, rendered like the options of a form (see [TranscriptElicitationOption]). */
+    val labelHtml: String = "",
+    val descriptionHtml: String = "",
+    val previewHtml: String = "",
 )
 
 /** One question the agent asked, as it was shown: a short [header], the text and its options. */
@@ -181,6 +185,8 @@ data class TranscriptQuestion(
     val question: String,
     val multiSelect: Boolean = false,
     val options: List<TranscriptQuestionOption> = emptyList(),
+    /** [question] as the Markdown it is, rendered by [TranscriptHtml.renderQuestion]. */
+    val questionHtml: String = "",
 )
 
 /**
@@ -246,10 +252,15 @@ data class PermissionResolvedEvent(val id: String, val status: String) : Transcr
 @Serializable
 data class TranscriptElicitationOption(
     val value: String,
+    /** Plain text, for the places that take no markup (an entry of a drop down). */
     val title: String,
     val description: String? = null,
-    /** Plain text shown in a monospace box while the option is selected; never markup. */
     val preview: String? = null,
+    /** The agent's Markdown, rendered by [TranscriptHtml.renderQuestionInline] / [TranscriptHtml.renderQuestion]. */
+    val titleHtml: String = "",
+    val descriptionHtml: String = "",
+    /** Shown in a monospace box while the option is selected; the whitespace of its lines is kept. */
+    val previewHtml: String = "",
 )
 
 /**
@@ -261,8 +272,11 @@ data class TranscriptElicitationOption(
 data class TranscriptElicitationField(
     val key: String,
     val kind: String,
+    /** Plain text; [titleHtml] / [descriptionHtml] are the agent's Markdown, rendered. */
     val title: String,
     val description: String? = null,
+    val titleHtml: String = "",
+    val descriptionHtml: String = "",
     val required: Boolean = false,
     /** Text, number, boolean or list of texts, matching [kind]; `null` for no default. */
     val default: JsonElement? = null,
@@ -285,6 +299,8 @@ data class ElicitationEvent(
     val id: String,
     val message: String,
     val fields: List<TranscriptElicitationField> = emptyList(),
+    /** [message] as the Markdown it is, rendered by [TranscriptHtml.renderQuestion]. */
+    val messageHtml: String = "",
 ) : TranscriptEvent
 
 /** Locks an elicitation card once it was answered (or the turn ended without an answer). */

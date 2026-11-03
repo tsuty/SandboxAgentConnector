@@ -422,8 +422,13 @@ pre.stream {
   font-family: var(--ra-mono-font, ui-monospace, Menlo, monospace);
   font-size: var(--ra-mono-size, 13px);
   line-height: 1.45;
+  /* The preview is Markdown, but its lines keep their breaks and indentation: a mockup or a
+     snippet written without a fence still reads as it was laid out. */
   white-space: pre;
 }
+
+/* Paragraphs of a preview sit closer than those of a message: it is one block of code or a mockup. */
+.elicitation-preview.markdown p { margin: 0 0 0.5em; }
 
 .elicitation-label { font-weight: 600; overflow-wrap: anywhere; }
 
