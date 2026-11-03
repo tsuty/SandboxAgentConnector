@@ -76,6 +76,12 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.0.5</h3>
+    <ul>
+        <li>Questions of the agent are rendered as Markdown, in the form and in the tool call row of the question:
+            the question, the titles and descriptions of its fields and options, and the previews. Links in them stay
+            text and cannot be clicked; a preview keeps the line breaks and indentation of its lines.</li>
+    </ul>
     <h3>0.0.4</h3>
     <ul>
         <li>The agent can ask questions with a form in the chat: text, number, check box, single and multiple choice
