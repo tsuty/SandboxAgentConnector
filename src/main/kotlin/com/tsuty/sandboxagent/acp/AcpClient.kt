@@ -1,6 +1,7 @@
 package com.tsuty.sandboxagent.acp
 
 import com.intellij.openapi.diagnostic.Logger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -293,6 +294,43 @@ class AcpClient(
     )
 
     /** Lists the sessions the agent remembers; only available when `sessionCapabilities.list` is set. */
+    /**
+     * Every session `session/list` reports, following `nextCursor` page by page until the agent
+     * reports none.
+     *
+     * The cursor is opaque: it is only handed back, never read or kept. A page that fails after
+     * the first, a cursor the agent repeats, or more than [maxPages] pages end the walk with what
+     * was gathered so far, so a misbehaving agent cannot keep the history list loading forever. A
+     * failing first page fails the call, as a single `session/list` would.
+     */
+    suspend fun listAllSessions(
+        params: SessionListParams = SessionListParams(),
+        maxPages: Int = MAX_SESSION_LIST_PAGES,
+    ): List<SessionListEntry> {
+        var page = listSessions(params.copy(cursor = null))
+        val sessions = page.sessions.toMutableList()
+        val seenCursors = mutableSetOf<String>()
+        var pages = 1
+        while (true) {
+            val cursor = page.nextCursor?.takeIf { it.isNotEmpty() } ?: break
+            if (!seenCursors.add(cursor) || pages >= maxPages) {
+                log.warn("Stopped following session/list after $pages pages (cursor repeated or page limit reached)")
+                break
+            }
+            page = try {
+                listSessions(params.copy(cursor = cursor))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log.warn("session/list failed on page ${pages + 1}; keeping the ${sessions.size} sessions listed so far", e)
+                break
+            }
+            sessions += page.sessions
+            pages++
+        }
+        return sessions
+    }
+
     suspend fun listSessions(params: SessionListParams = SessionListParams()): SessionListResult = requestResult(
         AcpMethods.SESSION_LIST,
         SessionListResult.serializer(),
@@ -441,6 +479,9 @@ class AcpClient(
         /** Silence, in seconds, that ends the wait for `initialize` (see [initialize]). */
         const val INITIALIZE_IDLE_TIMEOUT_SECONDS: Long = 60
         const val DEFAULT_TIMEOUT_SECONDS: Long = 120
+
+        /** Upper bound of the pages [listAllSessions] follows. */
+        const val MAX_SESSION_LIST_PAGES: Int = 100
 
         /** How often an idle wait re-checks the pending response; small enough to feel instant. */
         private const val IDLE_POLL_MILLIS: Long = 200

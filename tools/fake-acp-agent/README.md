@@ -80,12 +80,18 @@ JSON, so what the card sent can be read next to the card.
 | `string-id` | A JSON-RPC string id is echoed back unchanged. |
 | `tool-call` | A request tied to a `toolCallId`. |
 | `hang` | Press Stop while the form is open: it locks as `Cancelled` and the agent gets `cancel`. The turn waits for the answer, so there is no hurry. |
+| `withdraw` | Leave the form open: 3 seconds later the agent withdraws it with `$/cancel_request`. The form locks as `Cancelled` on its own and the transcript says "Withdrawn as expected" (the plugin answered `cancel`). |
+| `running` | A command reported as running that never reports its end. Press Stop: the row turns to `cancelled` right away, and stays so in a restored session. |
 | `bad-type`, `bad-items`, `no-mode`, `url` | The plugin refuses with `-32602` and no card appears; the transcript says "Refused as expected". |
 
 The `ask-*` scenarios also report the `tool_call` of the `AskUserQuestion` before the form (with the
 question as its title and the full `rawInput`) and its `tool_call_update` after it, so the record of
 the call can be looked at: a folded row in the `Worked` group that unfolds to the questions as asked
 and stays once the form is answered. The text of the answer is left out of it on purpose.
+
+The agent also lists five sessions through `session/list`, two a page, so the history popup must show
+all five ("Listed session 1 of 5" to "5 of 5") by following `nextCursor`. They can only be listed, not
+opened: the agent loads no history.
 
 Add `slow` to any prompt (`slow ask-single`) and the agent waits 10 seconds before it asks
 (`FAKE_SLOW_SECONDS` changes that). That is the window for what cannot be done in time against a real

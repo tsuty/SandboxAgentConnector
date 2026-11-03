@@ -57,12 +57,14 @@ import com.tsuty.sandboxagent.acp.StopReason
 import com.tsuty.sandboxagent.acp.TextContentBlock
 import com.tsuty.sandboxagent.acp.ThoughtChunkUpdate
 import com.tsuty.sandboxagent.acp.ToolCall
+import com.tsuty.sandboxagent.acp.ToolCallStatus
 import com.tsuty.sandboxagent.acp.ToolCallProgressUpdate
 import com.tsuty.sandboxagent.acp.ToolCallUpdateEvent
 import com.tsuty.sandboxagent.acp.ToolKind
 import com.tsuty.sandboxagent.acp.UsageCost
 import com.tsuty.sandboxagent.acp.UsageUpdate
 import com.tsuty.sandboxagent.acp.UserMessageChunkUpdate
+import com.tsuty.sandboxagent.acp.cancelledRequestId
 import com.tsuty.sandboxagent.acp.key
 import com.tsuty.sandboxagent.acp.plainText
 import com.tsuty.sandboxagent.acp.promptAttachments
@@ -92,6 +94,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -482,6 +485,9 @@ class SandboxAgentService(
     private val turnRunningRef = AtomicBoolean(false)
     private val permissions = ConcurrentHashMap<String, PermissionRequest>()
     private val elicitations = ConcurrentHashMap<String, ElicitationRequest>()
+
+    /** Tool calls of the running turn that have not ended, marked cancelled by [cancelPrompt]. */
+    private val unfinishedToolCalls = UnfinishedToolCalls()
 
     /**
      * Identifies this tab for the 1st tier of the lock ([SessionLockRegistry]): unique per
@@ -983,7 +989,7 @@ class SandboxAgentService(
         // The pristine session has nothing in it yet, so it is not offered as a session to enter.
         val pristine = pristineSessionId()
         val sessions = try {
-            val listed = acpClient.listSessions(SessionListParams(cwd = resolvedCwd())).sessions
+            val listed = acpClient.listAllSessions(SessionListParams(cwd = resolvedCwd()))
             // Deleted in the IDE, but still known to an agent that could not delete it.
             val local = runCatching { snapshotStore.index() }
                 .onFailure { log.warn("Failed to list the local sessions", it) }
@@ -1338,6 +1344,8 @@ class SandboxAgentService(
         // the editors for the turn, so a local edit cannot race those writes.
         workspaceGuard()?.turnStarted(this, agentName())
         turnRunningRef.set(true)
+        // What a replayed history or an earlier turn left unfinished is not this turn's to cancel.
+        unfinishedToolCalls.clear()
         publish(SandboxAgentEvent.TurnStarted)
         try {
             val result = acpClient.prompt(
@@ -1390,7 +1398,19 @@ class SandboxAgentService(
         } catch (e: Exception) {
             publish(SandboxAgentEvent.Error(e.message ?: "session/cancel failed", e))
         }
+        markUnfinishedToolCallsCancelled()
         endTurnWhenCancelIsIgnored()
+    }
+
+    /**
+     * Marks the tool calls the cancelled turn left running as cancelled, as ACP asks a client to do
+     * once it sent `session/cancel`. It goes out as an ordinary update of each call, so the card and
+     * the recorded transcript agree; an update the agent sends afterwards still replaces it.
+     */
+    private fun markUnfinishedToolCallsCancelled() {
+        unfinishedToolCalls.drain().forEach { id ->
+            publish(SandboxAgentEvent.ToolCallUpdated(ToolCall(toolCallId = id, status = ToolCallStatus.CANCELLED)))
+        }
     }
 
     /**
@@ -1613,8 +1633,22 @@ class SandboxAgentService(
     private fun handleNotification(notification: JsonRpcNotification) {
         when (notification.method) {
             AcpMethods.SESSION_UPDATE -> handleSessionUpdate(notification.params as? JsonObject)
+            AcpMethods.CANCEL_REQUEST -> handleCancelRequest(notification.params)
             else -> log.debug("Unhandled ACP notification: ${notification.method}")
         }
+    }
+
+    /**
+     * The agent withdraws a permission request or a form it sent (`$/cancel_request`), e.g. because
+     * the tool call behind it was aborted. The request is still answered — with the `cancelled`
+     * outcome or the `cancel` action, both valid answers to a cancelled request — and its card is
+     * locked by the same resolution (see `TranscriptPanel`). A request that was answered already
+     * has nothing left to cancel.
+     */
+    private fun handleCancelRequest(params: JsonElement?) {
+        val key = cancelledRequestId(params)?.key ?: return
+        val cancelled = (permissions[key]?.cancel() ?: false) or (elicitations[key]?.cancel() ?: false)
+        if (!cancelled) log.debug("\$/cancel_request for $key, which is not waiting for an answer")
     }
 
     /** Decoding never throws: unknown variants degrade to `_unknown` and are only logged. */
@@ -1642,8 +1676,14 @@ class SandboxAgentService(
                 publish(SandboxAgentEvent.AgentMessageChunk(update.content.plainText, update.messageId))
             is ThoughtChunkUpdate -> publish(SandboxAgentEvent.AgentThoughtChunk(update.content.plainText))
             is UserMessageChunkUpdate -> publishUserMessageChunk(update.content)
-            is ToolCallUpdateEvent -> publish(SandboxAgentEvent.ToolCallStarted(update.toolCall))
-            is ToolCallProgressUpdate -> publish(SandboxAgentEvent.ToolCallUpdated(update.toolCall))
+            is ToolCallUpdateEvent -> {
+                unfinishedToolCalls.track(update.toolCall)
+                publish(SandboxAgentEvent.ToolCallStarted(update.toolCall))
+            }
+            is ToolCallProgressUpdate -> {
+                unfinishedToolCalls.track(update.toolCall)
+                publish(SandboxAgentEvent.ToolCallUpdated(update.toolCall))
+            }
             is PlanUpdate -> publish(SandboxAgentEvent.PlanUpdated(update.entries))
             // Agents spell the switched mode as `currentModeId` or as `modeId`; a notification
             // that names neither says nothing worth publishing.

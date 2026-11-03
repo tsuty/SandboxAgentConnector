@@ -56,6 +56,7 @@ object ToolCallPresentation {
         ToolCallStatus.IN_PROGRESS -> "running"
         ToolCallStatus.COMPLETED -> "completed"
         ToolCallStatus.FAILED -> "failed"
+        ToolCallStatus.CANCELLED -> "cancelled"
         null -> ""
         else -> status
     }

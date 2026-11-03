@@ -209,6 +209,72 @@ class AcpClientTest {
         assertNull(message["id"])
     }
 
+    /**
+     * A client whose agent answers every `session/list` at once from [pages], keyed by the cursor
+     * of the request (`null` for the first page). A page given as `null` is answered with an error.
+     */
+    private fun pagedClient(pages: Map<String?, String?>, requests: MutableList<JsonObject>): AcpClient {
+        lateinit var client: AcpClient
+        client = AcpClient(writeLine = { line ->
+            val request = AcpJson.decodeFromString(JsonRpcRequest.serializer(), line)
+            val params = request.params!!.jsonObject
+            requests += params
+            val cursor = (params["cursor"] as? JsonPrimitive)?.content
+            val page = pages[cursor]
+            client.handleStdoutChunk(
+                if (page == null) {
+                    """{"jsonrpc":"2.0","id":${request.id},"error":{"code":-32603,"message":"boom"}}""" + "\n"
+                } else {
+                    """{"jsonrpc":"2.0","id":${request.id},"result":$page}""" + "\n"
+                },
+            )
+        })
+        return client
+    }
+
+    private fun page(vararg ids: String, next: String? = null): String =
+        """{"sessions":[${ids.joinToString(",") { """{"sessionId":"$it","cwd":"/w"}""" }}]""" +
+            (next?.let { ""","nextCursor":"$it"""" } ?: "") + "}"
+
+    @Test
+    fun `session list follows the cursor of every page`() = runBlocking {
+        val requests = mutableListOf<JsonObject>()
+        val client = pagedClient(
+            mapOf(null to page("a", "b", next = "p2"), "p2" to page("c", next = "p3"), "p3" to page("d")),
+            requests,
+        )
+
+        val sessions = client.listAllSessions(SessionListParams(cwd = "/w"))
+
+        assertEquals(listOf("a", "b", "c", "d"), sessions.map { it.sessionId })
+        // The filter goes along with every page, the cursor is handed back as it came.
+        assertEquals(listOf(null, "p2", "p3"), requests.map { (it["cursor"] as? JsonPrimitive)?.content })
+        assertTrue(requests.all { it["cwd"]!!.jsonPrimitive.content == "/w" })
+    }
+
+    @Test
+    fun `session list stops at a repeated cursor and at the page limit`() = runBlocking {
+        val looping = pagedClient(mapOf(null to page("a", next = "x"), "x" to page("b", next = "x")), mutableListOf())
+        assertEquals(listOf("a", "b"), looping.listAllSessions().map { it.sessionId })
+
+        val endless = pagedClient(
+            (0..10).associate { (if (it == 0) null else "p$it") to page("s$it", next = "p${it + 1}") },
+            mutableListOf(),
+        )
+        assertEquals(listOf("s0", "s1", "s2"), endless.listAllSessions(maxPages = 3).map { it.sessionId })
+    }
+
+    @Test
+    fun `session list keeps the pages it got when a later one fails`() = runBlocking {
+        val client = pagedClient(mapOf(null to page("a", next = "p2"), "p2" to null), mutableListOf())
+        assertEquals(listOf("a"), client.listAllSessions().map { it.sessionId })
+
+        // The first page is the whole answer of an agent that does not page: its failure is the call's.
+        val broken = pagedClient(mapOf(null to null), mutableListOf())
+        assertFailsWith<Exception> { broken.listAllSessions() }
+        Unit
+    }
+
     @Test
     fun `elicitation request is answered with the action and the original id`() {
         val sent = mutableListOf<String>()

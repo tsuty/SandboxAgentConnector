@@ -28,6 +28,27 @@ class AcpModelsTest {
     }
 
     @Test
+    fun `cancel request names the request as it was sent`() {
+        fun params(text: String) = AcpJson.parseToJsonElement(text)
+
+        assertEquals(rpcId(42), cancelledRequestId(params("""{"requestId":42}""")))
+        assertEquals(rpcId("elic-1"), cancelledRequestId(params("""{"requestId":"elic-1"}""")))
+        assertNull(cancelledRequestId(params("""{"requestId":null}""")))
+        assertNull(cancelledRequestId(params("""{}""")))
+        assertNull(cancelledRequestId(null))
+        assertEquals("$/cancel_request", AcpMethods.CANCEL_REQUEST)
+    }
+
+    @Test
+    fun `an update of the agent replaces the cancelled mark of the client`() {
+        val cancelled = ToolCall(toolCallId = "t", title = "Run", status = ToolCallStatus.CANCELLED)
+
+        assertEquals(ToolCallStatus.FAILED, cancelled.mergeWith(ToolCall(toolCallId = "t", status = ToolCallStatus.FAILED)).status)
+        // An update that says nothing about the status keeps the mark.
+        assertEquals(ToolCallStatus.CANCELLED, cancelled.mergeWith(ToolCall(toolCallId = "t", title = "Run 2")).status)
+    }
+
+    @Test
     fun `initialize result of the spec is decoded`() {
         val json = """
             {

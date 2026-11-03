@@ -139,7 +139,20 @@ object AcpMethods {
 
     /** Agent → Client request answered with [ElicitationResult] in the response `result`. */
     const val ELICITATION_CREATE = "elicitation/create"
+
+    /**
+     * Notification either side sends to cancel one of its own outstanding requests; the receiver
+     * still answers the request (see [cancelledRequestId]).
+     */
+    const val CANCEL_REQUEST = "\$/cancel_request"
 }
+
+/**
+ * The id of the request a `$/cancel_request` cancels, exactly as the request carried it (a number
+ * or a string); `null` for a notification that names none.
+ */
+fun cancelledRequestId(params: JsonElement?): JsonRpcId? =
+    ((params as? JsonObject)?.get("requestId") as? JsonPrimitive)?.takeIf { it !is JsonNull }
 
 /**
  * A tolerant boolean serializer that handles both JSON booleans (`true`/`false`)
@@ -482,6 +495,12 @@ object ToolCallStatus {
     const val IN_PROGRESS = "in_progress"
     const val COMPLETED = "completed"
     const val FAILED = "failed"
+
+    /**
+     * Not a status of ACP v1, which has no word for it: what the client marks a call with that had
+     * not ended when it cancelled the turn. A later update of the agent still replaces it.
+     */
+    const val CANCELLED = "cancelled"
 }
 
 /** ACP `ToolKind` values; drives the icon/label and the auto-allow mapping. */

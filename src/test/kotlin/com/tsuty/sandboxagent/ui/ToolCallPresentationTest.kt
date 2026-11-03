@@ -373,6 +373,12 @@ class ToolCallPresentationTest {
     }
 
     @Test
+    fun `a call the client cancelled says so`() {
+        assertEquals("cancelled", ToolCallPresentation.statusLabel(ToolCallStatus.CANCELLED))
+        assertEquals("running", ToolCallPresentation.statusLabel(ToolCallStatus.IN_PROGRESS))
+    }
+
+    @Test
     fun `only a switch mode gets the framed block`() {
         assertNull(ToolCallPresentation.switchModeEntry(edit))
     }

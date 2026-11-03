@@ -24,6 +24,7 @@ import com.tsuty.sandboxagent.acp.ToolCall
 import com.tsuty.sandboxagent.acp.ToolKind
 import com.tsuty.sandboxagent.acp.key
 import com.tsuty.sandboxagent.service.ElicitationRequest
+import com.tsuty.sandboxagent.service.PendingAnswer
 import com.tsuty.sandboxagent.service.PermissionRequest
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsBridge
 import com.tsuty.sandboxagent.settings.AgentEntry
@@ -312,6 +313,7 @@ class TranscriptPanel(
         closeGroup()
         val id = request.requestId.key
         permissions[id] = Pending(request, request.options, onSelect)
+        lockWhenResolvedElsewhere(request, id) { permissions.remove(id) != null }
         // The request carries the state of its tool call, which is what the diff of its card is
         // opened from: an approval may arrive before any `tool_call` update drew a card for it.
         val toolCall = request.toolCall
@@ -336,7 +338,29 @@ class TranscriptPanel(
         closeGroup()
         val id = request.requestId.key
         elicitations[id] = PendingForm(request, onAnswer)
+        lockWhenResolvedElsewhere(request, id, elicitation = true) { elicitations.remove(id) != null }
         view.post(TranscriptElicitation.event(id, request.form))
+    }
+
+    /**
+     * Locks the card of [request] as cancelled once the request is answered by anything but the
+     * card: the agent withdrew it (`$/cancel_request`), the turn was stopped, the session went.
+     *
+     * The card's own answer takes its entry out of the map before it resolves the request, so
+     * [takePending] finds nothing then and the status the card already shows is left alone.
+     */
+    private fun lockWhenResolvedElsewhere(
+        request: PendingAnswer,
+        id: String,
+        elicitation: Boolean = false,
+        takePending: () -> Boolean,
+    ) {
+        request.onResolved {
+            ApplicationManager.getApplication().invokeLater {
+                if (!takePending()) return@invokeLater
+                view.post(if (elicitation) ElicitationResolvedEvent(id, "Cancelled") else PermissionResolvedEvent(id, "Cancelled"))
+            }
+        }
     }
 
     /** Locks every card that is still waiting for an answer (the turn finished, the session went). */

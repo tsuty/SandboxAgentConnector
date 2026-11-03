@@ -252,6 +252,10 @@ SCENARIOS = {
     "string-id": lambda: form("The request id is a string.", {"q": {"type": "string", "enum": ["yes", "no"]}}),
     "twice": lambda: form("First of two questions.", {"q": {"type": "string", "enum": ["one", "two"]}}),
     "hang": lambda: form("Press Stop in the tool window: this form must lock as Cancelled.", {"q": {"type": "string"}}),
+    # The agent withdraws its own question with `$/cancel_request` a few seconds after asking.
+    "withdraw": lambda: form(f"Leave this open: the agent withdraws it in {WITHDRAW_SECONDS:g} seconds.", {"q": {"type": "string"}}),
+    # A tool call that keeps running until Stop is pressed; the agent never reports its end.
+    "running": lambda: form("unused", {}),
     # Requests the plugin has to refuse with -32602.
     "bad-type": lambda: form("A property type the form cannot draw.", {"x": {"type": "object"}}),
     "bad-items": lambda: form("An array that is not an enumeration.", {"x": {"type": "array", "items": {"type": "string"}}}),
@@ -262,6 +266,13 @@ SCENARIOS = {
 }
 
 RECORD_ONLY = {"ask-record"}
+WITHDRAW = {"withdraw"}
+RUNNING = {"running"}
+WITHDRAW_SECONDS = 3
+
+# What `session/list` answers, two sessions a page, so the client has to follow `nextCursor`.
+LISTED_SESSIONS = [f"listed-{index}" for index in range(1, 6)]
+LIST_PAGE_SIZE = 2
 LATE_INPUT = {"ask-late"}
 EXPECT_REFUSED = {"bad-type", "bad-items", "no-mode", "url"}
 
@@ -295,12 +306,14 @@ class FakeAgent:
             respond(message["id"], {
                 "protocolVersion": 1,
                 "agentInfo": {"name": "fake-elicitation-agent", "version": "1.0.0"},
-                "agentCapabilities": {"loadSession": False},
+                "agentCapabilities": {"loadSession": False, "sessionCapabilities": {"list": {}}},
                 "authMethods": [],
             })
         elif method == "session/new":
             self.session_id = str(uuid.uuid4())
             respond(message["id"], {"sessionId": self.session_id})
+        elif method == "session/list":
+            self.list_sessions(message)
         elif method == "session/prompt":
             self.start_turn(message)
         elif method == "session/cancel":
@@ -310,6 +323,18 @@ class FakeAgent:
             self.finish_turn("cancelled")
         elif "id" in message:
             respond(message["id"], {})
+
+    def list_sessions(self, message: dict) -> None:
+        """Pages of [LIST_PAGE_SIZE]; the cursor is the index of the first session of the page."""
+        cursor = (message.get("params") or {}).get("cursor")
+        start = int(cursor.removeprefix("from-")) if cursor else 0
+        page = LISTED_SESSIONS[start:start + LIST_PAGE_SIZE]
+        result = {"sessions": [{"sessionId": sid, "cwd": (message.get("params") or {}).get("cwd") or "/",
+                                "title": f"Listed session {sid.removeprefix('listed-')} of {len(LISTED_SESSIONS)}"}
+                               for sid in page]}
+        if start + LIST_PAGE_SIZE < len(LISTED_SESSIONS):
+            result["nextCursor"] = f"from-{start + LIST_PAGE_SIZE}"
+        respond(message["id"], result)
 
     def say(self, text: str) -> None:
         notify("session/update", {
@@ -322,6 +347,15 @@ class FakeAgent:
         text = " ".join(block.get("text", "") for block in (message.get("params") or {}).get("prompt", [])
                         if isinstance(block, dict)).lower()
         name = next((key for key in sorted(SCENARIOS, key=len, reverse=True) if key in text), None)
+        if name in RUNNING:
+            # Reported once as running and never again: only the client can mark it cancelled.
+            notify("session/update", {"sessionId": self.session_id, "update": {
+                "sessionUpdate": "tool_call", "toolCallId": f"toolu_running_{self.next_request_id}",
+                "title": "sleep 3600", "kind": "execute", "status": "in_progress",
+                "rawInput": {"command": "sleep 3600"},
+            }})
+            self.say("A command is running and will never report its end. Press Stop: its row must turn to `cancelled`.")
+            return
         if name in RECORD_ONLY:
             # A replayed history has no client to ask: the call is just reported, finished.
             self.report_ask_call(name, "pending")
@@ -393,6 +427,13 @@ class FakeAgent:
         self.waiting[request_id] = (name, round_number, call_id)
         self.say(f"Scenario `{name}`" + (f" (question {round_number})" if name == "twice" else "") + ":")
         send({"jsonrpc": "2.0", "id": request_id, "method": "elicitation/create", "params": params})
+        if name in WITHDRAW:
+            threading.Timer(WITHDRAW_SECONDS, self.withdraw, args=(request_id,)).start()
+
+    def withdraw(self, request_id) -> None:
+        """Withdraws a question the user has not answered yet; the client must still answer it."""
+        if request_id in self.waiting:
+            notify("$/cancel_request", {"requestId": request_id})
 
     def handle_response(self, message: dict) -> None:
         key = message.get("id")
@@ -411,6 +452,12 @@ class FakeAgent:
                 "status": "completed" if accepted else "failed",
                 "content": [{"type": "content", "content": {"type": "text", "text": answer}}],
             }})
+        if name in WITHDRAW and not error:
+            action = (message.get("result") or {}).get("action")
+            verdict = "as expected" if action == "cancel" else "UNEXPECTED"
+            self.say(f"Withdrawn {verdict}: the plugin answered with `{action}`.")
+            self.finish_turn("end_turn")
+            return
         if error:
             verdict = "as expected" if name in EXPECT_REFUSED else "UNEXPECTED"
             self.say(f"Refused {verdict}: `{error.get('code')}` {error.get('message')}")
