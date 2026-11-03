@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 /**
  * What the transcript document asks the host to do: everything that needs the IDE (opening a file,
@@ -56,6 +57,14 @@ data class SubmitChoicesAction(val id: String, val markdown: String) : Transcrip
 @Serializable
 @SerialName("permission")
 data class PermissionAction(val id: String, val optionId: String) : TranscriptAction
+
+/**
+ * Answers the pending `elicitation/create` of a card: [action] is `accept`, `decline` or `cancel`,
+ * and [content] holds the values of the form for `accept`.
+ */
+@Serializable
+@SerialName("elicitation")
+data class ElicitationAction(val id: String, val action: String, val content: JsonObject? = null) : TranscriptAction
 
 /** Parsing of the actions, so a document that speaks an older protocol cannot break the host. */
 object TranscriptProtocol {

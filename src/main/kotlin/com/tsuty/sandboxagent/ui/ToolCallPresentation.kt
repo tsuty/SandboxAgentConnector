@@ -16,9 +16,11 @@ import com.tsuty.sandboxagent.acp.ToolCallTerminal
 import com.tsuty.sandboxagent.acp.ToolKind
 import com.tsuty.sandboxagent.acp.UnknownToolCallContent
 import com.tsuty.sandboxagent.acp.plainText
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 
 /**
@@ -285,6 +287,64 @@ object ToolCallPresentation {
             ?: kindLabel(ToolKind.SWITCH_MODE)
         return SwitchModeEntry(headline = headline, modeId = modeId, plan = planText(toolCall))
     }
+
+    /** One option of a question the agent asked; [preview] is plain text (a code snippet, a mockup). */
+    data class AskOption(val label: String, val description: String?, val preview: String?)
+
+    data class AskQuestion(
+        val header: String?,
+        val question: String,
+        val multiSelect: Boolean,
+        val options: List<AskOption>,
+    )
+
+    /** The questions of an ask-the-user tool call, with the line that stands for them when folded. */
+    data class AskEntry(val headline: String, val questions: List<AskQuestion>)
+
+    /**
+     * Presentation of an `AskUserQuestion`-shaped call, `null` for every other call.
+     *
+     * The call is told by its input and not by its name or title: the title of a single question
+     * is the question itself, and the name is the agent's business. What the input has to look
+     * like is what Claude's tool takes — `questions`, each with a `question` and `options` that
+     * carry a `label`. A question without text or options is skipped, and a call with none left
+     * (an input that is still streaming in) is an ordinary call until the rest arrives.
+     *
+     * The card is folded like any other tool call, but what it unfolds to is the questions as
+     * they were put, not the JSON they came in. What was answered is not part of it: the call
+     * only knows what was asked.
+     */
+    fun askEntry(toolCall: ToolCall): AskEntry? {
+        if (toolCall.kind != null && toolCall.kind != ToolKind.OTHER) return null
+        val questions = ((toolCall.rawInput as? JsonObject)?.get("questions") as? JsonArray)
+            ?.mapNotNull(::askQuestion)
+            .orEmpty()
+        if (questions.isEmpty()) return null
+        val headline = questions.singleOrNull()
+            ?.let { "Asked: ${it.header ?: it.question}" }
+            ?: "Asked ${questions.size} questions"
+        return AskEntry(headline, questions)
+    }
+
+    private fun askQuestion(element: JsonElement): AskQuestion? {
+        val obj = element as? JsonObject ?: return null
+        val question = obj.text("question") ?: return null
+        val options = (obj["options"] as? JsonArray).orEmpty().mapNotNull { option ->
+            val entry = option as? JsonObject ?: return@mapNotNull null
+            val label = entry.text("label") ?: return@mapNotNull null
+            AskOption(label, entry.text("description"), entry.text("preview"))
+        }
+        if (options.isEmpty()) return null
+        return AskQuestion(
+            header = obj.text("header"),
+            question = question,
+            multiSelect = (obj["multiSelect"] as? JsonPrimitive)?.booleanOrNull == true,
+            options = options,
+        )
+    }
+
+    private fun JsonObject.text(name: String): String? =
+        (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
 
     /**
      * Markdown the agent attached to a `switch_mode`: its content blocks, which carry the plan.

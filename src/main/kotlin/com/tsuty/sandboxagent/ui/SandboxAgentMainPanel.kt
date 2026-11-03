@@ -433,6 +433,10 @@ class SandboxAgentMainPanel(
                 thinking.endThought()
                 showPermissionCard(event.request)
             }
+            is SandboxAgentEvent.ElicitationRequested -> {
+                thinking.endThought()
+                chatLog.showElicitation(event.request) { result -> service.respondToElicitation(event.request, result) }
+            }
             is SandboxAgentEvent.UsageUpdated -> updateTokenUsageButton(event)
             is SandboxAgentEvent.Error -> chatLog.appendError(event.message)
             // The list itself is read from the service when the dropdown is opened.

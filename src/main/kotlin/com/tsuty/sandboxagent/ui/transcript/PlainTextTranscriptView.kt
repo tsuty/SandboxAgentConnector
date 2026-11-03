@@ -65,9 +65,12 @@ class PlainTextTranscriptView : TranscriptView {
                 is StreamEvent -> text.append(event.text)
                 is BlockHtmlEvent -> Unit
                 is AttachmentsEvent -> line(event.chips.joinToString(", ") { it.label })
-                is ToolCallEvent -> line(event.switchMode?.headline ?: event.anchor)
+                is ToolCallEvent -> line(event.switchMode?.headline ?: event.question?.headline ?: event.anchor)
                 is PermissionEvent -> line(event.headline)
                 is PermissionResolvedEvent -> line(event.status)
+                // Never advertised without JCEF (see SandboxAgentService), so this is only a guard.
+                is ElicitationEvent -> line(event.message)
+                is ElicitationResolvedEvent -> line(event.status)
                 // A toast answers a copy button, and this view has none of them; the name and the
                 // drawing of the agent belong to a block header this view does not draw either.
                 is GroupEvent, is TurnEndEvent, is ThemeEvent, is AgentEvent, is ToastEvent -> Unit

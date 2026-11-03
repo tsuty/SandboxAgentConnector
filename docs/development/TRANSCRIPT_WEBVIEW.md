@@ -127,9 +127,11 @@ transcript instead of doubling it.
 | `blockHtml` | `id`, `html`, `choices` | replace the body of a block with its rendered Markdown |
 | `attachments` | `id`, `chips` | add attachment chips to a `USER` block (a replay reports them after the prompt) |
 | `group` | `id`, `timed`, `closed`, `elapsedMs` | open / close a tool call group; the label (`Working… 12s`, `Worked 12s`) is rendered and ticked by the web side |
-| `toolCall` | see below | add or update a tool call card (upsert by `id`) |
+| `toolCall` | see below | add or update a tool call card (upsert by `id`); an ask-the-user call carries `question` (`headline` and the `questions`, each with `header`, `question`, `multiSelect` and `options` of `label` / `description` / `preview`) and its folded row unfolds to the questions as they were put instead of the raw input |
 | `permission` | `id`, `toolCallId`, `headline`, `bodyHtml`, `flat`, `options` | inline approval card; `toolCallId` is what the `flat` diff of the card is opened by (`id` names the request, not a tool call) |
 | `permissionResolved` | `id`, `status` | disable the buttons, show what was picked |
+| `elicitation` | `id`, `message`, `fields` | inline form of an `elicitation/create` (form mode); a field is `key`, `kind` (`text` / `number` / `boolean` / `choice` / `multi`), `title`, `description`, `required`, `default`, `options` and the constraints of its kind |
+| `elicitationResolved` | `id`, `status` | disable the form, show what was done (`Submitted` / `Declined` / `Cancelled`) |
 | `turnEnd` | `id`, `targetId` | anchor the "scroll to the start of the turn" action to block `id` |
 | `toast` | `text` | show a message over the bottom edge for a moment |
 
@@ -194,7 +196,7 @@ One `JBCefJSQuery` carries a JSON object; the host dispatches on its `type`:
 
 `ready`, `openFile{path,line}`, `openDiff{toolCallId,diffIndex}`, `openUrl{url}`,
 `openAttachment{key}`, `copyBlock{id}`, `copyText{text}`, `submitChoices{id,markdown}`,
-`permission{id,optionId}`.
+`permission{id,optionId}`, `elicitation{id,action,content}` (`action` is `accept`, `decline` or `cancel`; `content` holds the values for `accept`).
 
 `openFile` / `openDiff` reuse `ToolCallPresentation.openFile` / `openFullDiff`, so the IDE side of
 the integration (editor navigation, platform diff viewer, `AgentWorkspaceGuard` refresh) is kept

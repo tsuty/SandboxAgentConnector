@@ -422,6 +422,46 @@
         if (group) group.body.appendChild(node); else append(node);
     }
 
+    /**
+     * The questions an ask call put to the user, as they were shown: the header, the text, and the
+     * options with their descriptions (a preview is folded away behind its own anchor). It is the
+     * body of the folded row of the call and records what was asked and nothing else, so a restored
+     * session still reads in full and the answer the agent goes on to give makes sense.
+     */
+    function askQuestions(question) {
+        var list = el('div', 'ask-body');
+        (question.questions || []).forEach(function (entry) {
+            list.appendChild(askQuestion(entry));
+        });
+        return list;
+    }
+
+    function askQuestion(question) {
+        var node = el('div', 'ask-question');
+        if (question.header) node.appendChild(el('span', 'ask-chip', question.header));
+        node.appendChild(el('div', 'ask-text', question.question));
+        node.appendChild(el('div', 'ask-hint', question.multiSelect ? 'Select one or more' : 'Select one'));
+        var list = el('div', 'ask-options');
+        (question.options || []).forEach(function (option) {
+            var row = el('div', 'ask-option' + (question.multiSelect ? ' ask-option--multi' : ''));
+            row.appendChild(el('span', 'ask-mark'));
+            var text = el('div', 'ask-option-text');
+            text.appendChild(el('div', 'ask-label', option.label));
+            if (option.description) text.appendChild(el('div', 'elicitation-description', option.description));
+            if (option.preview) {
+                var preview = el('pre', 'elicitation-preview');
+                preview.textContent = option.preview;
+                preview.hidden = true;
+                text.appendChild(anchor('Preview', preview));
+                text.appendChild(preview);
+            }
+            row.appendChild(text);
+            list.appendChild(row);
+        });
+        node.appendChild(list);
+        return node;
+    }
+
     function toolCallCard(event, expanded) {
         var content = document.createDocumentFragment();
         var line = el('div', 'toolcall-line');
@@ -443,14 +483,19 @@
                 expand(more, body, expanded);
             }
         } else {
-            var button = anchor(event.anchor, body);
+            var button = anchor(event.question ? event.question.headline : event.anchor, body);
             line.appendChild(button);
             expand(button, body, expanded);
         }
         if (event.statusLabel) {
             line.appendChild(el('span', 'status' + (event.failed ? ' notice--error' : ''), event.statusLabel));
         }
-        fillMarkdown(body, event.bodyHtml, null, event.id);
+        if (event.question) {
+            // What the call asked, as it was put; the raw input is not what a reader wants to see.
+            body.appendChild(askQuestions(event.question));
+        } else {
+            fillMarkdown(body, event.bodyHtml, null, event.id);
+        }
         content.appendChild(line);
         content.appendChild(body);
         return {content: content, body: body, expanded: !body.hidden};
@@ -551,6 +596,291 @@
         var entry = entries[event.id];
         if (!entry || !entry.actions) return;
         lock(entry.actions, entry.status, event.status);
+    }
+
+    // ---------------------------------------------------------------- elicitation
+
+    /** Selects with more options than this are drawn as a drop down instead of a column of radios. */
+    var MAX_RADIOS = 6;
+    var EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+    /**
+     * The form of an `elicitation/create`: the agent asks for structured input, and the card says
+     * who asks before it shows what.
+     *
+     * The answer is checked here before it is sent, so the user sees what is wrong and can fix it;
+     * the host checks it once more against the schema it kept (see `ElicitationForm.coerce`). An
+     * optional field left empty is not sent at all, which is how a question that was skipped is
+     * told apart from one answered with an empty string.
+     */
+    function addElicitation(event) {
+        var node = el('div', 'entry block block--permission framed');
+        node.appendChild(el('div', 'elicitation-source', ROLES.agent.title + ' asks'));
+        if (event.message) node.appendChild(el('div', 'permission-headline', event.message));
+
+        var form = el('form', 'elicitation-form');
+        form.noValidate = true;
+        var previousKey = null;
+        var controls = (event.fields || []).map(function (field) {
+            var control = buildField(form, event.id, field, previousKey);
+            previousKey = field.key;
+            return control;
+        });
+
+        var actions = el('div', 'permission-actions');
+        var status = el('div', 'permission-status');
+        status.hidden = true;
+        var submit = el('button', 'button button--default', 'Submit');
+        submit.type = 'submit';
+        var decline = el('button', 'button', 'Decline');
+        decline.type = 'button';
+        var cancel = el('button', 'button', 'Cancel');
+        cancel.type = 'button';
+        actions.appendChild(submit);
+        actions.appendChild(decline);
+        actions.appendChild(cancel);
+        form.appendChild(actions);
+        node.appendChild(form);
+        node.appendChild(status);
+
+        function answer(action, content, label) {
+            send({type: 'elicitation', id: event.id, action: action, content: content});
+            lockElicitation(entry, label);
+        }
+        form.addEventListener('submit', function (submitEvent) {
+            submitEvent.preventDefault();
+            var content = {};
+            var firstError = null;
+            controls.forEach(function (control) {
+                var result = control.read();
+                control.showError(result.error);
+                if (result.error && !firstError) firstError = control;
+                if (!result.error && !result.empty) content[control.field.key] = result.value;
+            });
+            if (firstError) {
+                firstError.focus();
+                return;
+            }
+            answer('accept', content, 'Submitted');
+        });
+        decline.addEventListener('click', function () { answer('decline', null, 'Declined'); });
+        cancel.addEventListener('click', function () { answer('cancel', null, 'Cancelled'); });
+
+        var entry = {node: node, form: form, status: status};
+        entries[event.id] = entry;
+        append(node);
+    }
+
+    /**
+     * One field: its label, its control and the line an error is shown in; see [checkField].
+     *
+     * Fields are told apart by a dotted rule, which is what keeps the questions of an
+     * `AskUserQuestion` apart. The free text "Other" field the adapter adds after each of them
+     * (`<key>_custom`) belongs to the question above it and is not separated from it.
+     */
+    function buildField(form, requestId, field, previousKey) {
+        var row = el('div', 'elicitation-field' +
+            (previousKey && field.key === previousKey + '_custom' ? ' elicitation-field--attached' : ''));
+        var error = el('div', 'elicitation-error');
+        error.hidden = true;
+        var read;
+        var focus;
+        var title = field.title + (field.required ? ' *' : '');
+
+        if (field.kind === 'boolean') {
+            var label = el('label', 'choice');
+            var box = el('input');
+            box.type = 'checkbox';
+            box.checked = field['default'] === true;
+            label.appendChild(box);
+            label.appendChild(el('span', null, title));
+            row.appendChild(label);
+            read = function () { return {value: box.checked}; };
+            focus = function () { box.focus(); };
+        } else {
+            row.appendChild(el('div', 'elicitation-label', title));
+        }
+        if (field.description) row.appendChild(el('div', 'elicitation-description', field.description));
+
+        if (field.kind === 'text' || field.kind === 'number') {
+            var input = el('input', 'elicitation-input');
+            input.type = field.kind === 'number' ? 'number' : 'text';
+            if (field.kind === 'number') input.step = field.integer ? '1' : 'any';
+            if (field['default'] != null) input.value = String(field['default']);
+            row.appendChild(input);
+            read = function () { return checkField(field, input.value); };
+            focus = function () { input.focus(); };
+        } else if (field.kind === 'choice') {
+            var picked = field['default'];
+            if ((field.options || []).length > MAX_RADIOS) {
+                var select = el('select', 'elicitation-input');
+                if (!field.required) select.appendChild(el('option', null, ''));
+                field.options.forEach(function (option) {
+                    var item = el('option', null, option.title);
+                    item.value = option.value;
+                    item.selected = option.value === picked;
+                    select.appendChild(item);
+                });
+                row.appendChild(select);
+                var selectPreview = previewBox(row, field.options);
+                select.addEventListener('change', function () { selectPreview.show(select.value); });
+                selectPreview.show(picked);
+                read = function () { return checkField(field, select.value); };
+                focus = function () { select.focus(); };
+            } else {
+                var radios = [];
+                var group = el('div', 'choices');
+                field.options.forEach(function (option) {
+                    var radio = el('input');
+                    radio.type = 'radio';
+                    radio.name = requestId + ':' + field.key;
+                    radio.value = option.value;
+                    radio.checked = option.value === picked;
+                    radios.push(radio);
+                    group.appendChild(optionLabel(radio, option));
+                });
+                row.appendChild(group);
+                var radioPreview = previewBox(row, field.options);
+                radios.forEach(function (radio) {
+                    radio.addEventListener('change', function () { radioPreview.show(radio.value); });
+                });
+                radioPreview.show(picked);
+                if (!field.required) {
+                    var clear = el('button', 'elicitation-clear', 'Clear');
+                    clear.type = 'button';
+                    clear.addEventListener('click', function () {
+                        radios.forEach(function (radio) { radio.checked = false; });
+                        radioPreview.show(null);
+                    });
+                    row.appendChild(clear);
+                }
+                read = function () {
+                    var checked = radios.filter(function (radio) { return radio.checked; })[0];
+                    return checkField(field, checked ? checked.value : '');
+                };
+                focus = function () { if (radios[0]) radios[0].focus(); };
+            }
+        } else if (field.kind === 'multi') {
+            var defaults = field['default'] || [];
+            var boxes = [];
+            var list = el('div', 'choices');
+            field.options.forEach(function (option) {
+                var checkbox = el('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = option.value;
+                checkbox.checked = defaults.indexOf(option.value) >= 0;
+                boxes.push(checkbox);
+                list.appendChild(optionLabel(checkbox, option));
+            });
+            row.appendChild(list);
+            read = function () {
+                return checkField(field, boxes.filter(function (checkbox) { return checkbox.checked; })
+                    .map(function (checkbox) { return checkbox.value; }));
+            };
+            focus = function () { if (boxes[0]) boxes[0].focus(); };
+        }
+
+        row.appendChild(error);
+        form.appendChild(row);
+        return {
+            field: field,
+            read: read || function () { return {empty: true}; },
+            focus: focus || function () {},
+            showError: function (text) {
+                error.textContent = text || '';
+                error.hidden = !text;
+            }
+        };
+    }
+
+    /**
+     * The monospace box under a single select that shows the `preview` of the selected option
+     * (a code snippet or a mockup the agent attached). It is text only, set with `textContent`,
+     * and it stays hidden while the selected option has none.
+     */
+    function previewBox(row, options) {
+        var box = el('pre', 'elicitation-preview');
+        box.hidden = true;
+        row.appendChild(box);
+        return {
+            show: function (value) {
+                var match = (options || []).filter(function (option) { return option.value === value; })[0];
+                var text = match && match.preview;
+                box.textContent = text || '';
+                box.hidden = !text;
+            }
+        };
+    }
+
+    /** A radio button or a check box with the title of its option and, quieter, its description. */
+    function optionLabel(input, option) {
+        var label = el('label', 'choice');
+        label.appendChild(input);
+        var text = el('span', 'choice-text');
+        text.appendChild(el('span', null, option.title));
+        if (option.description) text.appendChild(el('span', 'elicitation-description', option.description));
+        label.appendChild(text);
+        return label;
+    }
+
+    /**
+     * Checks [raw] against the constraints of [field] and returns `{value}` for an answer,
+     * `{empty: true}` for a field left empty and `{error}` for one that does not fit.
+     */
+    function checkField(field, raw) {
+        var kind = field.kind;
+        if (kind === 'boolean') return {value: !!raw};
+        var empty = kind === 'multi' ? raw.length === 0 : raw === '' || raw == null;
+        // Constraints only bind a value that is there: an optional field left empty is skipped.
+        if (empty) return field.required ? {error: 'This field is required.'} : {empty: true};
+        if (kind === 'text') {
+            if (field.minLength != null && raw.length < field.minLength) return {error: 'At least ' + field.minLength + ' characters.'};
+            if (field.maxLength != null && raw.length > field.maxLength) return {error: 'At most ' + field.maxLength + ' characters.'};
+            if (!matchesFormat(field.format, raw)) return {error: 'Not a valid ' + field.format + '.'};
+            if (field.pattern) {
+                var regex = null;
+                try { regex = new RegExp(field.pattern); } catch (ignored) { /* a pattern this engine cannot read is not held against the user */ }
+                if (regex && !regex.test(raw)) return {error: 'Does not match the expected pattern.'};
+            }
+            return {value: raw};
+        }
+        if (kind === 'number') {
+            var number = Number(raw);
+            if (!isFinite(number)) return {error: 'Not a number.'};
+            if (field.integer && Math.floor(number) !== number) return {error: 'Must be a whole number.'};
+            if (field.minimum != null && number < field.minimum) return {error: 'At least ' + field.minimum + '.'};
+            if (field.maximum != null && number > field.maximum) return {error: 'At most ' + field.maximum + '.'};
+            return {value: number};
+        }
+        if (kind === 'multi') {
+            if (field.minItems != null && raw.length < field.minItems) return {error: 'Choose at least ' + field.minItems + '.'};
+            if (field.maxItems != null && raw.length > field.maxItems) return {error: 'Choose at most ' + field.maxItems + '.'};
+        }
+        return {value: raw};
+    }
+
+    function matchesFormat(format, text) {
+        if (format === 'email') return EMAIL.test(text);
+        if (format === 'uri') {
+            try { new URL(text); return true; } catch (ignored) { return false; }
+        }
+        if (format === 'date') return /^\d{4}-\d{2}-\d{2}$/.test(text) && !isNaN(Date.parse(text));
+        if (format === 'date-time') return /(Z|[+-]\d{2}:\d{2})$/.test(text) && !isNaN(Date.parse(text));
+        return true;
+    }
+
+    function lockElicitation(entry, text) {
+        Array.prototype.forEach.call(entry.form.querySelectorAll('input, select, button'), function (control) {
+            control.disabled = true;
+        });
+        entry.status.textContent = text;
+        entry.status.hidden = false;
+    }
+
+    function resolveElicitation(event) {
+        var entry = entries[event.id];
+        if (!entry || !entry.form) return;
+        lockElicitation(entry, event.status);
     }
 
     // ---------------------------------------------------------------- search
@@ -785,6 +1115,8 @@
         toolCall: applyToolCall,
         permission: addPermission,
         permissionResolved: resolvePermission,
+        elicitation: addElicitation,
+        elicitationResolved: resolveElicitation,
         turnEnd: markTurnEnd,
         toast: showToast
     };

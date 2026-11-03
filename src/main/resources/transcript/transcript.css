@@ -278,9 +278,24 @@ pre.stream {
 
 .choices { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
 
-.choice { display: flex; align-items: baseline; gap: 6px; min-width: 0; cursor: pointer; }
+/*
+ * The control is centred on the first line of the text, not put on its baseline: a baseline puts a
+ * check box or a radio button above the middle of the line, more so with a CJK font, whose line is
+ * taller than the Latin one. `font: inherit` gives the control the font of the label, so that `1lh`
+ * is the height of that line and the margin below is half of what the control leaves of it.
+ */
+.choice { display: flex; align-items: flex-start; gap: 6px; min-width: 0; cursor: pointer; }
 
-.choice input[type="checkbox"] { flex: 0 0 auto; margin: 0; accent-color: var(--ra-accent, #3574f0); }
+.choice input[type="checkbox"],
+.choice input[type="radio"] {
+  flex: 0 0 auto;
+  width: 1em;
+  height: 1em;
+  margin: 0.2em 0 0;
+  margin-top: calc((1lh - 1em) / 2);
+  font: inherit;
+  accent-color: var(--ra-accent, #3574f0);
+}
 
 .choices-actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 4px; }
 
@@ -336,6 +351,113 @@ pre.stream {
 .permission-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 
 .permission-status { margin-top: 4px; color: var(--ra-quiet, #6e6e6e); font-size: var(--ra-small-size, 11px); }
+
+/* The record of an ask call: the questions as they were put, without anything to answer. */
+.ask-body { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+
+.ask-question { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.ask-question + .ask-question {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dotted var(--ra-border, #c9ccd6);
+}
+
+.ask-chip {
+  align-self: flex-start;
+  padding: 0 6px;
+  border: 1px solid var(--ra-border, #c9ccd6);
+  border-radius: 8px;
+  color: var(--ra-quiet, #6e6e6e);
+  font-size: var(--ra-small-size, 11px);
+}
+
+.ask-text { font-weight: 600; overflow-wrap: anywhere; }
+
+.ask-hint { color: var(--ra-quiet, #6e6e6e); font-size: var(--ra-small-size, 11px); }
+
+.ask-options { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+
+.ask-option { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+
+.ask-mark {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 0.85em;
+  height: 0.85em;
+  border: 1px solid var(--ra-quiet, #6e6e6e);
+  border-radius: 50%;
+  /* Centred on the first line of the label, like the controls of .choice. */
+  margin-top: 0.2em;
+  margin-top: calc((1lh - 0.85em) / 2);
+}
+
+.ask-option--multi .ask-mark { border-radius: 2px; }
+
+.ask-option-text { display: flex; flex-direction: column; min-width: 0; }
+
+.ask-label { overflow-wrap: anywhere; }
+
+.elicitation-source { color: var(--ra-quiet, #6e6e6e); font-size: var(--ra-small-size, 11px); }
+
+.elicitation-form { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+
+.elicitation-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+/* A dotted rule keeps the questions of a form apart; an "Other" field stays with its question. */
+.elicitation-field:not(:first-child):not(.elicitation-field--attached) {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dotted var(--ra-border, #c9ccd6);
+}
+
+.elicitation-preview {
+  box-sizing: border-box;
+  max-height: 240px;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: 4px;
+  background: var(--ra-code-bg, rgba(0, 0, 0, 0.06));
+  font-family: var(--ra-mono-font, ui-monospace, Menlo, monospace);
+  font-size: var(--ra-mono-size, 13px);
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.elicitation-label { font-weight: 600; overflow-wrap: anywhere; }
+
+.elicitation-description,
+.choice-text .elicitation-description { color: var(--ra-quiet, #6e6e6e); font-size: var(--ra-small-size, 11px); overflow-wrap: anywhere; }
+
+.choice-text { display: flex; flex-direction: column; min-width: 0; }
+
+
+.elicitation-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--ra-border, #c9ccd6);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ra-fg, #000000);
+  font-family: inherit;
+  font-size: var(--ra-font-size, 13px);
+}
+
+.elicitation-clear {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ra-quiet, #6e6e6e);
+  font-family: inherit;
+  font-size: var(--ra-small-size, 11px);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.elicitation-error { color: var(--ra-error, #c75450); font-size: var(--ra-small-size, 11px); }
 
 /* ---------- markdown body (GitHub / IDE preview look) ---------- */
 

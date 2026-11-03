@@ -136,6 +136,9 @@ object AcpMethods {
 
     /** Agent → Client request answered with [RequestPermissionResult] in the response `result`. */
     const val SESSION_REQUEST_PERMISSION = "session/request_permission"
+
+    /** Agent → Client request answered with [ElicitationResult] in the response `result`. */
+    const val ELICITATION_CREATE = "elicitation/create"
 }
 
 /**
@@ -229,6 +232,8 @@ data class FileSystemCapability(
 data class ClientCapabilities(
     val fs: FileSystemCapability = FileSystemCapability(),
     @Serializable(with = FlexibleBooleanSerializer::class) val terminal: Boolean = false,
+    /** Omitted while the client cannot show a form: an absent field means "unsupported". */
+    val elicitation: ElicitationCapabilities? = null,
 )
 
 @Serializable

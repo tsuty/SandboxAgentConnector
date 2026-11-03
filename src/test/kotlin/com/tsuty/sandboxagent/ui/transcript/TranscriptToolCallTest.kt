@@ -9,6 +9,7 @@ import com.tsuty.sandboxagent.acp.ToolCallDiff
 import com.tsuty.sandboxagent.acp.ToolCallLocation
 import com.tsuty.sandboxagent.acp.ToolCallStatus
 import com.tsuty.sandboxagent.acp.ToolKind
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -33,6 +34,40 @@ class TranscriptToolCallTest {
         status = ToolCallStatus.IN_PROGRESS,
         rawInput = buildJsonObject { put("command", "npm test") },
     )
+
+    @Test
+    fun `an ask call is drawn as the questions that were put and not as raw json`() {
+        val ask = ToolCall(
+            toolCallId = "toolu_ask",
+            title = "Asking for your input",
+            kind = ToolKind.OTHER,
+            status = ToolCallStatus.COMPLETED,
+            rawInput = Json.parseToJsonElement(
+                """{"questions":[{"header":"Language","question":"Which?","multiSelect":true,"options":[
+                    {"label":"Kotlin","description":"JVM","preview":"fun main() {}"},{"label":"Rust"}]}]}""",
+            ),
+        )
+
+        val event = TranscriptToolCall.event(ask, groupId = null)
+
+        val questions = requireNotNull(event.question)
+        assertEquals("Asked: Language", questions.headline)
+        val question = questions.questions.single()
+        assertEquals("Language", question.header)
+        assertTrue(question.multiSelect)
+        assertEquals(listOf("Kotlin", "Rust"), question.options.map { it.label })
+        assertEquals("JVM", question.options[0].description)
+        assertEquals("fun main() {}", question.options[0].preview)
+        // The raw input is the plumbing of the call: it is not dumped next to the questions.
+        assertEquals("", event.bodyHtml)
+        assertNull(event.switchMode)
+    }
+
+    @Test
+    fun `an ordinary call has no questions`() {
+        assertNull(TranscriptToolCall.event(execute, groupId = "group-1").question)
+        assertNull(TranscriptToolCall.event(edit, groupId = "group-1").question)
+    }
 
     /** A change is referenced by its index: the document asks the host to open the diff viewer. */
     @Test

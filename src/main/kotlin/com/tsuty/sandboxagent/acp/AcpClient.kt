@@ -95,7 +95,7 @@ class AcpTimeoutException(message: String) : RuntimeException(message)
  *
  * Both directions are supported: client initiated requests / notifications
  * (`initialize`, `session/new`, `session/prompt`, `session/cancel`, ...) and agent initiated
- * ones (`session/update` notifications, `session/request_permission` requests).
+ * ones (`session/update` notifications, `session/request_permission` and `elicitation/create` requests).
  */
 class AcpClient(
     private val writeLine: (String) -> Unit,
@@ -128,8 +128,9 @@ class AcpClient(
     var onNotification: ((JsonRpcNotification) -> Unit)? = null
 
     /**
-     * Requests initiated by the agent (`session/request_permission`). The handler owns the
-     * response: it must eventually call [respondToPermission] or [sendResponse] with the same id.
+     * Requests initiated by the agent (`session/request_permission`, `elicitation/create`). The
+     * handler owns the response: it must eventually call [respondToPermission],
+     * [respondToElicitation] or [sendResponse] with the same id.
      * Returning `false` makes the client answer with a JSON-RPC "method not found" error.
      */
     var onServerRequest: ((JsonRpcRequest) -> Boolean)? = null
@@ -172,6 +173,11 @@ class AcpClient(
             requestId,
             json.encodeToJsonElement(RequestPermissionResult.serializer(), RequestPermissionResult(outcome)),
         )
+    }
+
+    /** Answers an `elicitation/create` with [ElicitationResult] as the `result` of the response. */
+    fun respondToElicitation(requestId: JsonRpcId, result: ElicitationResult) {
+        sendResponse(requestId, json.encodeToJsonElement(ElicitationResult.serializer(), result))
     }
 
     /**

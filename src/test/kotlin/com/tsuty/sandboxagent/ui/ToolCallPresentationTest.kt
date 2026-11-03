@@ -7,11 +7,13 @@ import com.tsuty.sandboxagent.acp.ToolCallDiff
 import com.tsuty.sandboxagent.acp.ToolCallLocation
 import com.tsuty.sandboxagent.acp.ToolCallStatus
 import com.tsuty.sandboxagent.acp.ToolKind
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -373,5 +375,82 @@ class ToolCallPresentationTest {
     @Test
     fun `only a switch mode gets the framed block`() {
         assertNull(ToolCallPresentation.switchModeEntry(edit))
+    }
+
+    /** The input of Claude's `AskUserQuestion`, as `claude-agent-acp` reports it in `rawInput`. */
+    private fun askCall(input: String, kind: String? = ToolKind.OTHER) = ToolCall(
+        toolCallId = "toolu_ask",
+        title = "Asking for your input",
+        kind = kind,
+        status = ToolCallStatus.PENDING,
+        rawInput = Json.parseToJsonElement(input),
+    )
+
+    private val twoQuestions = """
+        {"questions":[
+          {"header":"エラー処理","question":"どれを使いますか","multiSelect":false,"options":[
+            {"label":"? 演算子","description":"簡潔です","preview":"fn a() {}\n"},
+            {"label":"match"}
+          ]},
+          {"header":"Checks","question":"Which checks?","multiSelect":true,"options":[{"label":"lint"}]}
+        ]}
+    """
+
+    @Test
+    fun `the questions of an ask call are read from its input`() {
+        val entry = requireNotNull(ToolCallPresentation.askEntry(askCall(twoQuestions)))
+
+        assertEquals("Asked 2 questions", entry.headline)
+        val first = entry.questions[0]
+        assertEquals("エラー処理", first.header)
+        assertEquals("どれを使いますか", first.question)
+        assertFalse(first.multiSelect)
+        assertEquals(listOf("? 演算子", "match"), first.options.map { it.label })
+        assertEquals("簡潔です", first.options[0].description)
+        assertEquals("fn a() {}\n", first.options[0].preview)
+        assertNull(first.options[1].description)
+        assertNull(first.options[1].preview)
+        assertTrue(entry.questions[1].multiSelect)
+    }
+
+    @Test
+    fun `a single question is named by its header`() {
+        val entry = requireNotNull(
+            ToolCallPresentation.askEntry(
+                askCall("""{"questions":[{"header":"Language","question":"Which?","options":[{"label":"Kotlin"}]}]}"""),
+            ),
+        )
+
+        assertEquals("Asked: Language", entry.headline)
+        // No header: the question itself says what it is.
+        val bare = requireNotNull(
+            ToolCallPresentation.askEntry(askCall("""{"questions":[{"question":"Which?","options":[{"label":"a"}]}]}""")),
+        )
+        assertEquals("Asked: Which?", bare.headline)
+    }
+
+    @Test
+    fun `an input that is not complete yet is an ordinary call`() {
+        assertNull(ToolCallPresentation.askEntry(askCall("{}")))
+        assertNull(ToolCallPresentation.askEntry(askCall("""{"questions":[]}""")))
+        // A question without text or without options is skipped, and none left means no entry.
+        assertNull(ToolCallPresentation.askEntry(askCall("""{"questions":[{"question":"?","options":[]}]}""")))
+        assertNull(ToolCallPresentation.askEntry(askCall("""{"questions":[{"options":[{"label":"a"}]}]}""")))
+        assertNull(ToolCallPresentation.askEntry(askCall("""{"questions":["text",3,null]}""")))
+        assertNull(ToolCallPresentation.askEntry(askCall("""{"questions":{"question":"?"}}""")))
+        val partial = requireNotNull(
+            ToolCallPresentation.askEntry(
+                askCall("""{"questions":[{"question":"?"},{"question":"ok","options":[{"label":"a"},{"description":"no label"}]}]}"""),
+            ),
+        )
+        assertEquals(1, partial.questions.size)
+        assertEquals(listOf("a"), partial.questions.single().options.map { it.label })
+    }
+
+    @Test
+    fun `only a call of no particular kind can be an ask call`() {
+        assertNotNull(ToolCallPresentation.askEntry(askCall(twoQuestions, kind = null)))
+        assertNull(ToolCallPresentation.askEntry(askCall(twoQuestions, kind = ToolKind.EXECUTE)))
+        assertNull(ToolCallPresentation.askEntry(askCall(twoQuestions, kind = ToolKind.SWITCH_MODE)))
     }
 }

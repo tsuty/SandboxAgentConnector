@@ -4,6 +4,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.concurrent.TimeUnit
@@ -205,6 +207,32 @@ class AcpClientTest {
         assertEquals(AcpMethods.SESSION_CANCEL, message["method"]!!.jsonPrimitive.content)
         assertEquals("sess_1", message["params"]!!.jsonObject["sessionId"]!!.jsonPrimitive.content)
         assertNull(message["id"])
+    }
+
+    @Test
+    fun `elicitation request is answered with the action and the original id`() {
+        val sent = mutableListOf<String>()
+        val client = AcpClient(writeLine = { sent += it })
+        var received: JsonRpcRequest? = null
+        client.onServerRequest = { request ->
+            received = request
+            true
+        }
+
+        client.handleStdoutChunk(
+            """{"jsonrpc":"2.0","id":"elic-1","method":"elicitation/create","params":{"sessionId":"s","mode":"form","message":"m","requestedSchema":{"type":"object","properties":{}}}}""" + "\n",
+        )
+
+        val request = assertNotNull(received)
+        assertEquals(AcpMethods.ELICITATION_CREATE, request.method)
+        client.respondToElicitation(request.id, ElicitationResult.accept(JsonObject(mapOf("a" to JsonPrimitive("b")))))
+
+        val response = AcpJson.decodeFromString(JsonRpcResponse.serializer(), sent.single())
+        assertEquals(rpcId("elic-1"), response.id)
+        assertNull(response.error)
+        val result = AcpJson.decodeFromJsonElement(ElicitationResult.serializer(), assertNotNull(response.result))
+        assertEquals(ElicitationResult.ACCEPT, result.action)
+        assertEquals("b", result.content!!["a"]!!.jsonPrimitive.content)
     }
 
     @Test

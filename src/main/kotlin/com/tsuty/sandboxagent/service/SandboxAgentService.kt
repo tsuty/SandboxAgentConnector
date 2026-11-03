@@ -4,6 +4,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
+import com.intellij.ui.jcef.JBCefApp
 import com.tsuty.sandboxagent.acp.AcpClient
 import com.tsuty.sandboxagent.acp.AcpContextItem
 import com.tsuty.sandboxagent.acp.AcpJson
@@ -15,11 +16,17 @@ import com.tsuty.sandboxagent.acp.AgentMessageChunkUpdate
 import com.tsuty.sandboxagent.acp.AgentStderrTail
 import com.tsuty.sandboxagent.acp.AvailableCommand
 import com.tsuty.sandboxagent.acp.AvailableCommandsUpdate
+import com.tsuty.sandboxagent.acp.ClientCapabilities
 import com.tsuty.sandboxagent.acp.ConfigOptionUpdate
 import com.tsuty.sandboxagent.acp.ContentBlock
 import com.tsuty.sandboxagent.acp.CurrentModeUpdate
 import com.tsuty.sandboxagent.acp.CurrentModelUpdate
+import com.tsuty.sandboxagent.acp.InitializeParams
+import com.tsuty.sandboxagent.acp.ElicitationCapabilities
+import com.tsuty.sandboxagent.acp.ElicitationForm
+import com.tsuty.sandboxagent.acp.ElicitationResult
 import com.tsuty.sandboxagent.acp.InitializeResult
+import com.tsuty.sandboxagent.acp.JsonRpcError
 import com.tsuty.sandboxagent.acp.JsonRpcId
 import com.tsuty.sandboxagent.acp.JsonRpcNotification
 import com.tsuty.sandboxagent.acp.JsonRpcRequest
@@ -94,6 +101,26 @@ import java.util.concurrent.atomic.AtomicReference
 
 enum class SessionState { DISCONNECTED, CONNECTING, READY, ERROR }
 
+/** A request of the agent that waits for the user: what a tab marks on its chip until it is answered. */
+interface PendingAnswer {
+    val isResolved: Boolean
+
+    /**
+     * Runs [action] once this request is answered, whichever way: the user answered it, the
+     * auto-allow settings did before the UI ever saw it, or it lapsed with the turn (see
+     * [SandboxAgentService.cancelPendingRequests]).
+     *
+     * There is no event for any of that, and none is worth adding: a request that goes away is not
+     * news for the transcript, only for whoever put up an affordance for it. A tab marks the
+     * request on its chip (`SandboxAgentTabsPanel`) and has to take that mark down again even when
+     * nobody ever clicked it.
+     *
+     * [action] runs on whichever thread completed the request, so a listener touching Swing has to
+     * hop to the EDT itself.
+     */
+    fun onResolved(action: () -> Unit)
+}
+
 /**
  * A pending `session/request_permission`. The transport thread never blocks: it publishes this
  * object and a coroutine awaits [outcome], which the UI (or the auto-allow settings) completes.
@@ -101,13 +128,13 @@ enum class SessionState { DISCONNECTED, CONNECTING, READY, ERROR }
 class PermissionRequest(
     val requestId: JsonRpcId,
     val params: RequestPermissionParams,
-) {
+) : PendingAnswer {
     val outcome: CompletableDeferred<PermissionOutcome> = CompletableDeferred()
 
     val toolCall: ToolCall get() = params.toolCall
     val options: List<PermissionOption> get() = params.options
 
-    val isResolved: Boolean get() = outcome.isCompleted
+    override val isResolved: Boolean get() = outcome.isCompleted
 
     /** Answers the request; the first call wins, later ones are ignored. */
     fun resolve(outcome: PermissionOutcome): Boolean = this.outcome.complete(outcome)
@@ -116,20 +143,29 @@ class PermissionRequest(
 
     fun cancel(): Boolean = resolve(PermissionOutcome.cancelled())
 
-    /**
-     * Runs [action] once this request is answered, whichever way: the user picked an option, the
-     * auto-allow settings answered it before the UI ever saw it, or it lapsed with the turn (see
-     * [SandboxAgentService.cancelPendingPermissions]).
-     *
-     * There is no event for any of that, and none is worth adding: a request that goes away is not
-     * news for the transcript, only for whoever put up an affordance for it. A tab marks the
-     * request on its chip (`SandboxAgentTabsPanel`, [SandboxAgentEvent.PermissionRequested]) and has
-     * to take that mark down again even when nobody ever clicked it.
-     *
-     * [action] runs on whichever thread completed the request, so a listener touching Swing has to
-     * hop to the EDT itself.
-     */
-    fun onResolved(action: () -> Unit) {
+    override fun onResolved(action: () -> Unit) {
+        outcome.invokeOnCompletion { action() }
+    }
+}
+
+/**
+ * A pending form `elicitation/create`, handled the way a [PermissionRequest] is: the transport
+ * thread publishes it and a coroutine awaits [outcome], which the UI completes.
+ */
+class ElicitationRequest(
+    val requestId: JsonRpcId,
+    val form: ElicitationForm,
+) : PendingAnswer {
+    val outcome: CompletableDeferred<ElicitationResult> = CompletableDeferred()
+
+    override val isResolved: Boolean get() = outcome.isCompleted
+
+    /** Answers the request; the first call wins, later ones are ignored. */
+    fun resolve(result: ElicitationResult): Boolean = outcome.complete(result)
+
+    fun cancel(): Boolean = resolve(ElicitationResult.cancel())
+
+    override fun onResolved(action: () -> Unit) {
         outcome.invokeOnCompletion { action() }
     }
 }
@@ -239,6 +275,11 @@ sealed interface SandboxAgentEvent {
     /** The agent asks for permission. */
     data class PermissionRequested(
         val request: PermissionRequest,
+    ) : SandboxAgentEvent
+
+    /** The agent asks the user to fill in a form (`elicitation/create`, form mode). */
+    data class ElicitationRequested(
+        val request: ElicitationRequest,
     ) : SandboxAgentEvent
 
     data class Error(val message: String, val throwable: Throwable? = null) : SandboxAgentEvent
@@ -440,6 +481,7 @@ class SandboxAgentService(
      */
     private val turnRunningRef = AtomicBoolean(false)
     private val permissions = ConcurrentHashMap<String, PermissionRequest>()
+    private val elicitations = ConcurrentHashMap<String, ElicitationRequest>()
 
     /**
      * Identifies this tab for the 1st tier of the lock ([SessionLockRegistry]): unique per
@@ -649,12 +691,15 @@ class SandboxAgentService(
 
                 override fun onTerminated(exitCode: Int) {
                     acpClient.failPending(IllegalStateException("Sandbox process terminated with exit code $exitCode"))
-                    cancelPendingPermissions()
+                    cancelPendingRequests()
                     setState(SessionState.DISCONNECTED, "Sandbox process terminated (exit code $exitCode)")
                 }
             })
             val initialize = withStartupProgress(stderrTail) {
-                acpClient.initialize(idleTimeoutSeconds = config.initializeIdleTimeoutSeconds.toLong())
+                acpClient.initialize(
+                    clientInitializeParams(),
+                    idleTimeoutSeconds = config.initializeIdleTimeoutSeconds.toLong(),
+                )
             }
             initializeResult = initialize
             requireSupportedProtocol(initialize)
@@ -1308,7 +1353,7 @@ class SandboxAgentService(
             finishTurn(null)
         } finally {
             finishTurn(null)
-            cancelPendingPermissions()
+            cancelPendingRequests()
             // Unlocks the editors again and pulls in whatever the agent wrote during the turn.
             workspaceGuard()?.turnFinished(this)
             // The turn boundary is the only point where the transcript is complete and stable.
@@ -1340,7 +1385,7 @@ class SandboxAgentService(
         val acpClient = client ?: return@launch
         val sessionId = sessionIdRef.get() ?: return@launch
         try {
-            cancelPendingPermissions()
+            cancelPendingRequests()
             acpClient.cancel(sessionId)
         } catch (e: Exception) {
             publish(SandboxAgentEvent.Error(e.message ?: "session/cancel failed", e))
@@ -1378,6 +1423,10 @@ class SandboxAgentService(
     /** Answers a pending `session/request_permission`. Safe to call twice. */
     fun respondToPermission(request: PermissionRequest, option: PermissionOption): Boolean =
         request.resolve(option)
+
+    /** Answers a pending `elicitation/create`. Safe to call twice. */
+    fun respondToElicitation(request: ElicitationRequest, result: ElicitationResult): Boolean =
+        request.resolve(result)
 
     fun selectMode(modeId: String): Job = select(SelectorChange.Mode(modeId), "session/set_mode")
 
@@ -1511,7 +1560,7 @@ class SandboxAgentService(
     private fun closeSession() {
         // Detach only tears down the ACP agent process; the sandbox itself is left running
         // so it can keep serving other clients (IDE-independent work, other attach sessions, ...).
-        cancelPendingPermissions()
+        cancelPendingRequests()
         client?.failPending(IllegalStateException("Session closed"))
         processManager?.stopAgent()
         trafficLogger?.close()
@@ -1675,8 +1724,13 @@ class SandboxAgentService(
      * Handles agent initiated requests. Returns `false` for unsupported methods so [AcpClient]
      * answers them with a JSON-RPC "method not found" error.
      */
-    private fun handleServerRequest(request: JsonRpcRequest): Boolean {
-        if (request.method != AcpMethods.SESSION_REQUEST_PERMISSION) return false
+    private fun handleServerRequest(request: JsonRpcRequest): Boolean = when (request.method) {
+        AcpMethods.SESSION_REQUEST_PERMISSION -> handlePermissionRequest(request)
+        AcpMethods.ELICITATION_CREATE -> handleElicitationRequest(request)
+        else -> false
+    }
+
+    private fun handlePermissionRequest(request: JsonRpcRequest): Boolean {
         val params = request.params as? JsonObject ?: return false
         val permissionParams = runCatching {
             AcpJson.decodeFromJsonElement(RequestPermissionParams.serializer(), params)
@@ -1696,6 +1750,45 @@ class SandboxAgentService(
         return true
     }
 
+    /**
+     * A form the user can fill in. A request this client did not advertise (another mode) or whose
+     * schema it cannot show is refused with "invalid params" — never rendered as something it is not.
+     */
+    private fun handleElicitationRequest(request: JsonRpcRequest): Boolean {
+        val form = runCatching {
+            ElicitationForm.parse(request.params as? JsonObject ?: throw IllegalArgumentException("params are missing"))
+        }.getOrElse {
+            log.warn("Refusing elicitation/create: ${it.message}")
+            runCatching {
+                client?.sendResponse(request.id, error = JsonRpcError(JsonRpcError.INVALID_PARAMS, it.message ?: "Invalid params"))
+            }.onFailure { failure -> log.warn("Failed to refuse elicitation/create", failure) }
+            return true
+        }
+        val elicitation = ElicitationRequest(request.id, form)
+        elicitations[request.id.key] = elicitation
+        awaitElicitationOutcome(elicitation)
+        publish(SandboxAgentEvent.ElicitationRequested(elicitation))
+        if (!elicitation.isResolved && listeners.isEmpty()) {
+            log.info("No listener can answer elicitation/create; cancelling it")
+            elicitation.cancel()
+        }
+        return true
+    }
+
+    private fun awaitElicitationOutcome(elicitation: ElicitationRequest) {
+        scope.launch {
+            val result = elicitation.outcome.await()
+            val acpClient = client
+            if (acpClient == null) {
+                log.debug("Dropping elicitation result: the session is already closed")
+            } else {
+                runCatching { acpClient.respondToElicitation(elicitation.requestId, result) }
+                    .onFailure { publish(SandboxAgentEvent.Error(it.message ?: "Failed to answer elicitation/create", it)) }
+            }
+            elicitations.remove(elicitation.requestId.key)
+        }
+    }
+
     /** Waits for the UI without blocking the transport thread. */
     private fun awaitPermissionOutcome(permission: PermissionRequest) {
         scope.launch {
@@ -1712,8 +1805,9 @@ class SandboxAgentService(
     }
 
     /** Releases the agent from waiting when the turn ends or the session goes away. */
-    private fun cancelPendingPermissions() {
+    private fun cancelPendingRequests() {
         permissions.values.forEach { it.cancel() }
+        elicitations.values.forEach { it.cancel() }
     }
 
     private fun setState(newState: SessionState, message: String? = null) {
@@ -1727,6 +1821,17 @@ class SandboxAgentService(
             runCatching { it.onEvent(event) }.onFailure { failure -> log.warn("Sandbox agent listener failed", failure) }
         }
     }
+
+    /**
+     * What this client offers the agent. A form is only advertised where it can be answered: the
+     * plain text fallback of the transcript (no JCEF) has no way to fill one in, and an agent that
+     * is told otherwise would wait for an answer nobody can give.
+     */
+    private fun clientInitializeParams(): InitializeParams = InitializeParams(
+        clientCapabilities = ClientCapabilities(
+            elicitation = ElicitationCapabilities.FORM_ONLY.takeIf { JBCefApp.isSupported() },
+        ),
+    )
 
     /** Reads the persisted settings; `null` when the project service is unavailable (light tests). */
     private fun persistedConfig(): SandboxConfig? {

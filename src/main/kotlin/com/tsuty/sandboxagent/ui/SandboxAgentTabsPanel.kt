@@ -13,7 +13,7 @@ import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.tsuty.sandboxagent.acp.SessionListEntry
-import com.tsuty.sandboxagent.service.PermissionRequest
+import com.tsuty.sandboxagent.service.PendingAnswer
 import com.tsuty.sandboxagent.service.ReadOnlySource
 import com.tsuty.sandboxagent.service.SandboxAgentEvent
 import com.tsuty.sandboxagent.service.SandboxAgentEventListener
@@ -436,7 +436,8 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
             -> chips[tab.id]?.updateConnection()
             // Marked on the chip so a tab that is not in front can say the agent is waiting for an
             // answer of its own (Ph2 §2: every tab stays live in the background).
-            is SandboxAgentEvent.PermissionRequested -> chips[tab.id]?.permissionRequested(event.request)
+            is SandboxAgentEvent.PermissionRequested -> chips[tab.id]?.answerRequested(event.request)
+            is SandboxAgentEvent.ElicitationRequested -> chips[tab.id]?.answerRequested(event.request)
             else -> Unit
         }
     }
@@ -514,7 +515,7 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         /**
          * `session/request_permission`s of this tab that nobody has answered yet, counted rather
          * than flagged: an agent may ask again while an earlier request is still open, and each
-         * one takes itself off this count when it is resolved (see [permissionRequested]).
+         * one takes itself off this count when it is resolved (see [answerRequested]).
          */
         private var pendingPermissions = 0
 
@@ -729,14 +730,15 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
         }
 
         /**
-         * Marks a `session/request_permission` of this tab on [agentLabel] until it is answered.
+         * Marks a request of this tab that waits for the user (a `session/request_permission` or an
+         * `elicitation/create`) on [agentLabel] until it is answered.
          *
          * Only the request itself is marked (Ph2: a turn that merely ends is not news — every tab
          * ends its turns, so marking that would light the whole strip up). A request the settings
          * auto-allowed is already resolved when it arrives here and is never marked, which is what
          * keeps the mark from flickering on every allowed tool call.
          */
-        fun permissionRequested(request: PermissionRequest) {
+        fun answerRequested(request: PendingAnswer) {
             if (request.isResolved) return
             pendingPermissions++
             updateConnection()

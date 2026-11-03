@@ -6,6 +6,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonShortcuts
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.colors.EditorColorsListener
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.colors.EditorColorsScheme
@@ -15,12 +16,14 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.ui.jcef.JBCefApp
+import com.tsuty.sandboxagent.acp.ElicitationResult
 import com.tsuty.sandboxagent.acp.PermissionOption
 import com.tsuty.sandboxagent.acp.PlanEntry
 import com.tsuty.sandboxagent.acp.PromptAttachment
 import com.tsuty.sandboxagent.acp.ToolCall
 import com.tsuty.sandboxagent.acp.ToolKind
 import com.tsuty.sandboxagent.acp.key
+import com.tsuty.sandboxagent.service.ElicitationRequest
 import com.tsuty.sandboxagent.service.PermissionRequest
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsBridge
 import com.tsuty.sandboxagent.settings.AgentEntry
@@ -28,6 +31,7 @@ import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
 import com.tsuty.sandboxagent.ui.PromptAttachmentNavigation
 import com.tsuty.sandboxagent.ui.SandboxAgentColors
 import com.tsuty.sandboxagent.ui.ToolCallPresentation
+import kotlinx.serialization.json.JsonObject
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.datatransfer.StringSelection
@@ -100,12 +104,20 @@ class TranscriptPanel(
 
     private val permissions = mutableMapOf<String, Pending>()
 
+    /** Forms the agent waits for, by the id of their request. */
+    private val elicitations = mutableMapOf<String, PendingForm>()
+
     private class OpenGroup(val id: String, val startedAt: Long?)
 
     private class Pending(
         val request: PermissionRequest,
         val options: List<PermissionOption>,
         val onSelect: (PermissionOption) -> Unit,
+    )
+
+    private class PendingForm(
+        val request: ElicitationRequest,
+        val onAnswer: (ElicitationResult) -> Unit,
     )
 
     init {
@@ -260,9 +272,9 @@ class TranscriptPanel(
      * state of the call (an update only carries what changed).
      *
      * Every kind but `switch_mode` joins the foldable group of the current run: a mode switch
-     * changes what the agent may do for the rest of the session, so its framed block stays an
-     * entry of its own. [restored] marks a card redrawn from a stored transcript or replayed by
-     * the agent, which its group must not time as a live run.
+     * changes what the agent is allowed to do for the rest of the session, so its framed block
+     * stays an entry of its own. [restored] marks a card redrawn from a stored transcript or
+     * replayed by the agent, which its group must not time as a live run.
      */
     fun showToolCall(toolCall: ToolCall, restored: Boolean = false): ToolCall {
         val id = toolCall.toolCallId
@@ -315,11 +327,27 @@ class TranscriptPanel(
         )
     }
 
+    /**
+     * Shows the inline form of an `elicitation/create`. The fields are the ones the agent asked
+     * for; [onAnswer] gets what the user did with them, already checked against the schema.
+     */
+    fun showElicitation(request: ElicitationRequest, onAnswer: (ElicitationResult) -> Unit) {
+        endStreaming()
+        closeGroup()
+        val id = request.requestId.key
+        elicitations[id] = PendingForm(request, onAnswer)
+        view.post(TranscriptElicitation.event(id, request.form))
+    }
+
     /** Locks every card that is still waiting for an answer (the turn finished, the session went). */
     fun cancelPermissions() {
         permissions.keys.toList().forEach { id ->
             permissions.remove(id)
             view.post(PermissionResolvedEvent(id, "Cancelled"))
+        }
+        elicitations.keys.toList().forEach { id ->
+            elicitations.remove(id)
+            view.post(ElicitationResolvedEvent(id, "Cancelled"))
         }
     }
 
@@ -444,6 +472,7 @@ class TranscriptPanel(
             is CopyTextAction -> copy(action.text)
             is SubmitChoicesAction -> onSubmitPrompt(action.markdown)
             is PermissionAction -> answerPermission(action)
+            is ElicitationAction -> answerElicitation(action)
         }
     }
 
@@ -474,6 +503,28 @@ class TranscriptPanel(
     }
 
     /**
+     * The document checks the form before it sends it, so an `accept` that does not fit the schema
+     * is not expected; when it comes anyway the agent is told the user cancelled rather than being
+     * handed values that break the schema it asked for.
+     */
+    private fun answerElicitation(action: ElicitationAction) {
+        val pending = elicitations.remove(action.id) ?: return
+        val (result, status) = when (action.action) {
+            ElicitationResult.ACCEPT -> runCatching { pending.request.form.coerce(action.content ?: JsonObject(emptyMap())) }
+                .map { ElicitationResult.accept(it) to "Submitted" }
+                .getOrElse {
+                    LOG.warn("Dropping an elicitation answer that does not fit the schema: ${it.message}")
+                    ElicitationResult.cancel() to "Cancelled"
+                }
+
+            ElicitationResult.DECLINE -> ElicitationResult.decline() to "Declined"
+            else -> ElicitationResult.cancel() to "Cancelled"
+        }
+        pending.onAnswer(result)
+        view.post(ElicitationResolvedEvent(action.id, status))
+    }
+
+    /**
      * Shows the markup of the transcript document in a read only editor tab, which is what the
      * `Show Page Source` entry of the internal mode context menu ends in (see [JcefTranscriptView]).
      * The tab is backed by an in memory file: nothing is written to the project.
@@ -497,9 +548,12 @@ class TranscriptPanel(
 
     override fun dispose() {
         permissions.clear()
+        elicitations.clear()
     }
 
     private companion object {
+        private val LOG = Logger.getInstance(TranscriptPanel::class.java)
+
         /** Option id of the `Cancel` button a request without any option of its own gets. */
         private const val CANCEL_OPTION = "__cancel"
 

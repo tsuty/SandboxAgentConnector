@@ -20,6 +20,7 @@ object TranscriptToolCall {
     /** [groupId] is `null` for a call that stays an entry of its own (a `switch_mode`). */
     fun event(toolCall: ToolCall, groupId: String?): ToolCallEvent {
         val switchMode = ToolCallPresentation.switchModeEntry(toolCall)
+        val ask = if (switchMode == null) ToolCallPresentation.askEntry(toolCall) else null
         return ToolCallEvent(
             id = toolCall.toolCallId,
             groupId = groupId,
@@ -28,12 +29,25 @@ object TranscriptToolCall {
             statusLabel = statusLabel(toolCall),
             failed = toolCall.status == ToolCallStatus.FAILED,
             flat = flat(toolCall),
-            bodyHtml = if (switchMode == null) TranscriptHtml.render(ToolCallPresentation.expandedBody(toolCall)) else "",
+            bodyHtml = if (switchMode == null && ask == null) TranscriptHtml.render(ToolCallPresentation.expandedBody(toolCall)) else "",
             switchMode = switchMode?.let {
                 TranscriptSwitchMode(
                     headline = it.headline,
                     modeId = it.modeId,
                     planHtml = TranscriptHtml.render(it.plan),
+                )
+            },
+            question = ask?.let { entry ->
+                TranscriptQuestions(
+                    headline = entry.headline,
+                    questions = entry.questions.map { question ->
+                        TranscriptQuestion(
+                            header = question.header,
+                            question = question.question,
+                            multiSelect = question.multiSelect,
+                            options = question.options.map { TranscriptQuestionOption(it.label, it.description, it.preview) },
+                        )
+                    },
                 )
             },
         )

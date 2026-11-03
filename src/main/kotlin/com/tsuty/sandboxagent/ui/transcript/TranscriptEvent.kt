@@ -2,6 +2,7 @@ package com.tsuty.sandboxagent.ui.transcript
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /**
  * What the host tells the transcript document to do (see `docs/development/TRANSCRIPT_WEBVIEW.md`).
@@ -165,6 +166,33 @@ data class TranscriptSwitchMode(
     val planHtml: String = "",
 )
 
+/** One option of a [TranscriptQuestion]; [preview] is plain text, shown in a monospace box. */
+@Serializable
+data class TranscriptQuestionOption(
+    val label: String,
+    val description: String? = null,
+    val preview: String? = null,
+)
+
+/** One question the agent asked, as it was shown: a short [header], the text and its options. */
+@Serializable
+data class TranscriptQuestion(
+    val header: String? = null,
+    val question: String,
+    val multiSelect: Boolean = false,
+    val options: List<TranscriptQuestionOption> = emptyList(),
+)
+
+/**
+ * An ask-the-user tool call: the body of its folded card shows the questions that were asked
+ * instead of the raw input. [headline] is the line of the card while it is folded.
+ */
+@Serializable
+data class TranscriptQuestions(
+    val headline: String,
+    val questions: List<TranscriptQuestion> = emptyList(),
+)
+
 /** Adds a tool call card, or refreshes the one that already carries [id]. */
 @Serializable
 @SerialName("toolCall")
@@ -179,6 +207,7 @@ data class ToolCallEvent(
     val flat: TranscriptFlatEntry? = null,
     val bodyHtml: String = "",
     val switchMode: TranscriptSwitchMode? = null,
+    val question: TranscriptQuestions? = null,
 ) : TranscriptEvent
 
 /** One button of an inline permission card, built from what the agent offered. */
@@ -212,6 +241,56 @@ data class PermissionEvent(
 @Serializable
 @SerialName("permissionResolved")
 data class PermissionResolvedEvent(val id: String, val status: String) : TranscriptEvent
+
+/** One choice of a select field of an elicitation card. */
+@Serializable
+data class TranscriptElicitationOption(
+    val value: String,
+    val title: String,
+    val description: String? = null,
+    /** Plain text shown in a monospace box while the option is selected; never markup. */
+    val preview: String? = null,
+)
+
+/**
+ * One field of an elicitation card. [kind] is `text`, `number`, `boolean`, `choice` or `multi`;
+ * the rest are the constraints of the schema that apply to that kind, which the document checks
+ * before it sends anything (the host checks the answer again).
+ */
+@Serializable
+data class TranscriptElicitationField(
+    val key: String,
+    val kind: String,
+    val title: String,
+    val description: String? = null,
+    val required: Boolean = false,
+    /** Text, number, boolean or list of texts, matching [kind]; `null` for no default. */
+    val default: JsonElement? = null,
+    val options: List<TranscriptElicitationOption> = emptyList(),
+    val minLength: Int? = null,
+    val maxLength: Int? = null,
+    val format: String? = null,
+    val pattern: String? = null,
+    val minimum: Double? = null,
+    val maximum: Double? = null,
+    val integer: Boolean = false,
+    val minItems: Int? = null,
+    val maxItems: Int? = null,
+)
+
+/** Inline form of an `elicitation/create` (form mode): the agent asks the user for structured input. */
+@Serializable
+@SerialName("elicitation")
+data class ElicitationEvent(
+    val id: String,
+    val message: String,
+    val fields: List<TranscriptElicitationField> = emptyList(),
+) : TranscriptEvent
+
+/** Locks an elicitation card once it was answered (or the turn ended without an answer). */
+@Serializable
+@SerialName("elicitationResolved")
+data class ElicitationResolvedEvent(val id: String, val status: String) : TranscriptEvent
 
 /**
  * Ends a turn: [id] is the last message block of it, which gets the action scrolling back to the

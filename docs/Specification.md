@@ -85,13 +85,13 @@ This ensures versatility across alternative sandbox implementations and allows c
 Complies with **ACP v1** based on JSON-RPC 2.0 to handle prompt exchanges, permission requests (tool execution / file modifications), and streaming notifications.
 
 * **Version Negotiation**: Sends `protocolVersion: 1` and `clientInfo` (`SandboxAgentConnector` / `1.0.0`) in `initialize`. If the agent returns less than 1, the connection is treated as an error.
-* **Client Capabilities**: For complete sandbox containment, `fs.readTextFile`, `fs.writeTextFile`, and `terminal` are all reported as `false`.
+* **Client Capabilities**: For complete sandbox containment, `fs.readTextFile`, `fs.writeTextFile`, and `terminal` are all reported as `false`. `elicitation` advertises **form mode only** (`{"form": {}}`), and only when the transcript can be drawn with JCEF; without JCEF, or for URL mode (which would need the target shown and consented to before navigating), it is left out, which ACP reads as "unsupported". This is also what lets the Claude agent adapter keep its `AskUserQuestion` tool: it disables the tool for a client that does not advertise `elicitation.form`.
 * **Authentication (`authenticate`)**: Assumes authentication is pre-configured when starting the sandbox; not executed by the plugin (even if `authMethods` are returned, they are only logged).
 * **MCP (`mcpServers`)**: Assumes configuration is completed on the agent side and always transmits an empty array.
 * **Outbound Methods (Client → Agent)**: `initialize` / `session/new` / `session/load` / `session/list` / `session/resume` / `session/delete` / `session/prompt` / `session/cancel` / `session/set_mode` / `session/set_model` / `session/set_config_option`. Availability of optional session-related methods is determined by inspecting `agentCapabilities.loadSession` and `sessionCapabilities.{list,resume,delete}`.
-* **Inbound Methods (Agent → Client)**: Notification `session/update`, request `session/request_permission`.
+* **Inbound Methods (Agent → Client)**: Notification `session/update`, requests `session/request_permission` and `elicitation/create` (form mode).
 * **Handling `session/update`**: Processes `agent_message_chunk` / `agent_thought_chunk` / `user_message_chunk` / `tool_call` / `tool_call_update` / `plan` / `current_mode_update` / `current_model_update` / `config_option_update` / `available_commands_update` / `usage_update` / `session_info_update`. Unknown variants are ignored and logged without failing decoding.
-* **Unsupported Agent-Initiated Requests**: Returns JSON-RPC error `-32601 (method not found)` to prevent the agent from hanging.
+* **Unsupported Agent-Initiated Requests**: Returns JSON-RPC error `-32601 (method not found)` to prevent the agent from hanging. An `elicitation/create` whose `mode` is not `form`, or whose `requestedSchema` holds a property the form cannot draw, is refused with `-32602 (invalid params)` instead of being shown with a field missing.
 * **Timeouts**: 180 seconds for `initialize`, default 120 seconds for other requests. `session/prompt` has no timeout because turns can run for a prolonged period; all pending requests fail simultaneously if the process terminates.
 
 ```text
@@ -197,12 +197,21 @@ To prevent sensitive information from being unintentionally transmitted to exter
   * **Command Execution**:
     * Extracts and displays the command to be executed (e.g., `npm test`) from `rawInput`.
     * Execution logs are displayed inside the collapsible detail area of the corresponding tool card.
+  * **Questions to the user (`AskUserQuestion`)**:
+    * The tool call is told by its input, not its title (the title of a single question is the question itself): `rawInput.questions`, each with a `question` and `options` that carry a `label`. A question without text or options is skipped; a call with none left (its input still streaming in) is an ordinary call until the rest arrives, and is then taken out of its group.
+    * It is folded like any other tool call: a row in the `Worked` group of the run, whose line says `Asked: {header}` (or `Asked {n} questions`). Unfolded, it shows what was asked instead of the raw input: per question a header chip, the question, a "Select one / Select one or more" hint, and the options with their descriptions (a `preview` is folded behind its own `Preview` anchor). The questions of a call are separated by a dotted rule.
+    * Only what was asked is recorded, not what was answered. The record comes from the tool call, so it is also there when a session is restored from the agent's history or from a local snapshot, where no form is shown.
   * **Mode Switch (`switch_mode`)**:
     * Because `options` represent candidate target modes rather than allow/reject choices, the header is formatted as `Switch mode: {Title}  →  {Mode ID}`, with the plan body rendered directly as Markdown without collapse anchors.
     * The outcome is notified via `session/update` with `current_mode_update`. Since the ACP specification refers to `modeId` while the schema refers to `currentModeId`, both property names are accepted.
     * Tool call `content` may be sent as raw `{"type":"text"}` without wrapping in `{"type":"content"}`; this is also supported as a content block.
     * A test mock agent is available under [tools/fake-acp-agent](../tools/fake-acp-agent/README.md).
   * **Options**: Buttons are generated directly from `options` in `session/request_permission` (`allow_once` / `allow_always` / `reject_once` / `reject_always`), returning the selection as `outcome` (no custom options are invented client-side). Buttons are disabled after response, leaving the chosen outcome displayed on the card. If the turn is cancelled, `cancelled` is returned.
+
+  * **Elicitation (`elicitation/create`, form mode)**: The agent's structured questions (for the Claude agent, its `AskUserQuestion` tool) arrive as an inline form card that names the asking agent and shows the `message`.
+    * **Fields** are drawn from the flat `requestedSchema`: text (`minLength` / `maxLength` / `pattern` / `format` of `email`, `uri`, `date`, `date-time`), number / integer (`minimum` / `maximum`), boolean (check box), single select (`enum` / `oneOf`; radio buttons, a drop down above six options) and multi select (`array` of `enum` / `anyOf`; check boxes with `minItems` / `maxItems`). `default` values are pre-filled, and an option's `description` is shown under its title. A dotted rule separates the fields; the free text "Other" field the Claude adapter adds after each question (`<key>_custom`) stays with the question above it. The `preview` the adapter attaches to the options of an `AskUserQuestion` (`_meta["_claude/askUserQuestionOption"].preview`) is shown, as plain text in a scrollable monospace box, under a single select while that option is selected.
+    * **Buttons**: `Submit` answers `accept` with the values, `Decline` answers `decline`, `Cancel` answers `cancel`. The form is validated before it is sent (and again by the host against the schema it kept); an optional field left empty is not sent, so a skipped question is told apart from an empty answer. All controls are disabled after the answer and the card shows what was done.
+    * If the turn is cancelled or the session ends while a form is open, `cancel` is returned. The tab chip marks a form waiting in a background tab like a permission request.
 
 > Note: Auto-approval per tool kind (Auto-Allow) is not implemented yet. Approval always requires explicit user action. To avoid repetitive confirmations, select `allow_always` provided by the agent.
 
