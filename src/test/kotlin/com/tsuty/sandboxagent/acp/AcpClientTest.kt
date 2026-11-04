@@ -38,6 +38,20 @@ class AcpClientTest {
     }
 
     @Test
+    fun `stdout noise is reported, up to the unterminated last line of a dying agent`() {
+        val noise = mutableListOf<String>()
+        val client = AcpClient(writeLine = {})
+        client.onStdoutNoise = { noise += it }
+
+        client.handleStdoutChunk("Error: ANTHROPIC_API_KEY is not set\n")
+        client.handleStdoutChunk("""{"jsonrpc":"2.0","method":"session/update","params":{}}""" + "\n  \n")
+        client.handleStdoutChunk("exiting")
+        client.failPending(IllegalStateException("terminated"))
+
+        assertEquals(listOf("Error: ANTHROPIC_API_KEY is not set", "exiting"), noise)
+    }
+
+    @Test
     fun `line accumulator joins split chunks`() {
         val accumulator = LineAccumulator()
         assertEquals(emptyList(), accumulator.append("""{"jsonrpc":"2.0","""))

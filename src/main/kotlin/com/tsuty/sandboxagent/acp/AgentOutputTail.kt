@@ -1,15 +1,18 @@
 package com.tsuty.sandboxagent.acp
 
 /**
- * Keeps the last lines the agent process wrote to `stderr`.
+ * Keeps the last lines a process in the sandbox wrote outside the protocol: everything on `stderr`,
+ * and the `stdout` lines of the agent that are not JSON-RPC.
  *
  * `stderr` is the only place the first run reports progress: `npx` downloads and unpacks the
- * agent there while `initialize` waits. The lines are cleaned up for display — ANSI escapes are
- * dropped and `\r` (used by progress bars to rewrite the current line) separates lines like `\n`
- * does — so the newest one can be shown as the connection message, and the last few can be
- * appended to an error.
+ * agent there while `initialize` waits. It is also where a failed start explains itself (an npm
+ * error, a blocked download, a missing command), and some agents print such errors on `stdout`
+ * instead, where the ACP parser would only skip them. The lines are cleaned up for display — ANSI
+ * escapes are dropped and `\r` (used by progress bars to rewrite the current line) separates lines
+ * like `\n` does — so the newest one can be shown as the connection message, and the last few can
+ * be appended to an error.
  */
-class AgentStderrTail(private val capacity: Int = DEFAULT_CAPACITY) {
+class AgentOutputTail(private val capacity: Int = DEFAULT_CAPACITY) {
     private val lines = ArrayDeque<String>()
     private val buffer = StringBuilder()
 
@@ -28,6 +31,14 @@ class AgentStderrTail(private val capacity: Int = DEFAULT_CAPACITY) {
                 start = i + 1
             }
             buffer.delete(0, start)
+        }
+    }
+
+    /** Keeps the line still waiting for its terminator, e.g. the last one of a process that ended. */
+    fun flush() {
+        synchronized(lines) {
+            add(buffer.toString())
+            buffer.setLength(0)
         }
     }
 

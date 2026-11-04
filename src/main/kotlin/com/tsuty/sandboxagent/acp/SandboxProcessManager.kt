@@ -1,13 +1,17 @@
 package com.tsuty.sandboxagent.acp
 
 import com.intellij.execution.configurations.GeneralCommandLine
+import com.intellij.execution.configurations.PathEnvironmentVariableUtil
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.execution.process.ProcessEvent
 import com.intellij.execution.process.ProcessListener
 import com.intellij.execution.process.ProcessOutputType
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.util.Key
+import com.intellij.openapi.util.SystemInfo
+import com.intellij.util.EnvironmentUtil
 import com.intellij.util.execution.ParametersListUtil
+import java.io.File
 import java.nio.charset.StandardCharsets
 
 /**
@@ -127,13 +131,41 @@ class SandboxProcessManager(
         get() = agentHandler?.isProcessTerminated == false
 
     /** The sandbox to attach to: the configured name, or the project when there is none. */
-    private val sandboxName: String get() = config.sandboxName.ifBlank { variables.projectName }
+    val sandboxName: String get() = config.sandboxName.ifBlank { variables.projectName }
+
+    /** First word of the agent command: what starts the agent, e.g. `npx` or `uvx`. */
+    val launcher: String get() = SandboxCommand.toArguments(variables.agentCommand).firstOrNull().orEmpty()
 
     /**
-     * Runs an environment-agnostic probe through the attach command to confirm the sandbox is
-     * reachable. Only the exit code matters (0 = healthy); the probe output is ignored on purpose.
+     * Whether the sandbox CLI can be started at all, looked up the way [GeneralCommandLine] does:
+     * a path as is, a bare name on the `PATH` — on macOS the one of the login shell, which an IDE
+     * started from the Dock does not inherit.
      */
-    fun healthCheck(): Int = runToCompletion()
+    fun sandboxCommandExists(): Boolean {
+        val cli = config.sandboxCommand.trim()
+        if (cli.isEmpty()) return false
+        if (cli.contains('/') || cli.contains(File.separatorChar)) return File(cli).canExecute()
+        if (SystemInfo.isMac) {
+            val shellPath = EnvironmentUtil.getValue("PATH")
+            if (shellPath != null && PathEnvironmentVariableUtil.findInPath(cli, shellPath, null) != null) return true
+        }
+        return PathEnvironmentVariableUtil.findExecutableInPathOnAnyOS(cli) != null
+    }
+
+    /**
+     * Runs an environment-agnostic probe through the attach command to confirm the sandbox name is
+     * valid and the sandbox can be entered. It is bounded: a CLI may wait for a sign-in instead of
+     * failing (`sbx` opens a browser and waits when signed out), and the output is kept, since the
+     * CLI explains its own failure best.
+     */
+    fun healthCheck(): ProbeResult = probe(HEALTH_CHECK_COMMAND, HEALTH_CHECK_TIMEOUT_SECONDS)
+
+    /**
+     * Runs `<launcher> --help` in the sandbox, to tell a missing launcher from an agent that
+     * failed on its own. Only run once the agent has already exited.
+     */
+    fun probeLauncher(): ProbeResult =
+        probe(ParametersListUtil.join(listOf(launcher, LAUNCHER_PROBE_ARGUMENT)), LAUNCHER_PROBE_TIMEOUT_SECONDS)
 
     /** Starts `<cli> exec -i <name> ...` and wires the streams to [listener]. */
     fun startAgent(listener: SandboxProcessListener): OSProcessHandler {
@@ -183,16 +215,29 @@ class SandboxProcessManager(
             .withCharset(StandardCharsets.UTF_8)
     }
 
-    private fun runToCompletion(): Int {
-        val handler = OSProcessHandler(commandLine(HEALTH_CHECK_COMMAND))
+    /**
+     * Runs [command] through the attach command and waits at most [timeoutSeconds] for it. Its
+     * stdin is closed right away, so a command that reads it sees the end instead of waiting.
+     */
+    private fun probe(command: String, timeoutSeconds: Long): ProbeResult {
+        val output = AgentOutputTail()
+        val handler = OSProcessHandler(commandLine(command))
         handler.addProcessListener(object : ProcessListener {
             override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
+                if (!ProcessOutputType.isStdout(outputType) && !ProcessOutputType.isStderr(outputType)) return
                 log.info("[sbx] ${event.text.trimEnd()}")
+                output.append(event.text)
             }
         })
         handler.startNotify()
-        handler.waitFor()
-        return handler.exitCode ?: -1
+        runCatching { handler.processInput.close() }
+        val finished = handler.waitFor(timeoutSeconds * 1000)
+        if (!finished) {
+            log.warn("[sbx] probe did not finish within ${timeoutSeconds}s")
+            handler.destroyProcess()
+        }
+        output.flush()
+        return ProbeResult(if (finished) handler.exitCode ?: -1 else null, output.tail(StartupDiagnosis.QUOTED_LINES))
     }
 
     companion object {
@@ -201,5 +246,14 @@ class SandboxProcessManager(
          * `echo` is a shell builtin available in every sandbox, so no configuration is required.
          */
         const val HEALTH_CHECK_COMMAND: String = "echo sandbox-agent-connector"
+
+        /** Bound of the health check; generous, since `sbx exec` first starts a stopped sandbox. */
+        const val HEALTH_CHECK_TIMEOUT_SECONDS: Long = 60
+
+        /** Argument the launcher probe passes; every launcher offered (`npx`, `uvx`, ...) knows it. */
+        private const val LAUNCHER_PROBE_ARGUMENT = "--help"
+
+        /** Bound of the launcher probe; `--help` returns at once, a hung launcher proves nothing. */
+        private const val LAUNCHER_PROBE_TIMEOUT_SECONDS: Long = 15
     }
 }

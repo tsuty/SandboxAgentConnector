@@ -13,7 +13,7 @@ import com.tsuty.sandboxagent.acp.AcpTimeoutException
 import com.tsuty.sandboxagent.acp.AcpTrafficLogger
 import com.tsuty.sandboxagent.acp.AgentCapabilities
 import com.tsuty.sandboxagent.acp.AgentMessageChunkUpdate
-import com.tsuty.sandboxagent.acp.AgentStderrTail
+import com.tsuty.sandboxagent.acp.AgentOutputTail
 import com.tsuty.sandboxagent.acp.AvailableCommand
 import com.tsuty.sandboxagent.acp.AvailableCommandsUpdate
 import com.tsuty.sandboxagent.acp.ClientCapabilities
@@ -39,6 +39,7 @@ import com.tsuty.sandboxagent.acp.RequestPermissionParams
 import com.tsuty.sandboxagent.acp.SandboxConfig
 import com.tsuty.sandboxagent.acp.SandboxProcessListener
 import com.tsuty.sandboxagent.acp.SandboxProcessManager
+import com.tsuty.sandboxagent.acp.SandboxStartupException
 import com.tsuty.sandboxagent.acp.SandboxVariables
 import com.tsuty.sandboxagent.acp.SessionConfigOption
 import com.tsuty.sandboxagent.acp.SessionDeleteParams
@@ -53,6 +54,7 @@ import com.tsuty.sandboxagent.acp.SessionNotification
 import com.tsuty.sandboxagent.acp.SessionPromptParams
 import com.tsuty.sandboxagent.acp.SessionResumeParams
 import com.tsuty.sandboxagent.acp.SessionUpdate
+import com.tsuty.sandboxagent.acp.StartupDiagnosis
 import com.tsuty.sandboxagent.acp.StopReason
 import com.tsuty.sandboxagent.acp.TextContentBlock
 import com.tsuty.sandboxagent.acp.ThoughtChunkUpdate
@@ -83,6 +85,7 @@ import com.tsuty.sandboxagent.session.TranscriptEntry
 import com.tsuty.sandboxagent.settings.AgentEntry
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
 import com.tsuty.sandboxagent.vfs.AgentWorkspaceGuard
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -653,11 +656,15 @@ class SandboxAgentService(
     }
 
     /**
-     * Attach flow, made of four steps:
-     * 1. Health check — a lightweight probe that confirms the sandbox is reachable (exit code only).
-     * 2. Agent start — launches the ACP agent inside the sandbox.
-     * 3. `initialize` — negotiates the protocol version and the capabilities.
-     * 4. `session/list` — publishes the sessions the user may enter; nothing is restored yet.
+     * Attach flow, made of five steps:
+     * 1. Sandbox command — the CLI of the sandbox type is on the `PATH`.
+     * 2. Health check — `echo` run through the attach command proves the sandbox name is valid.
+     * 3. Agent start — launches the ACP agent inside the sandbox.
+     * 4. `initialize` — negotiates the protocol version and the capabilities.
+     * 5. `session/list` — publishes the sessions the user may enter; nothing is restored yet.
+     *
+     * Every check relies only on what all sandbox CLIs and all agents share; when one fails, the
+     * message names the step and quotes what the CLI or the agent printed (see [StartupDiagnosis]).
      */
     suspend fun connectSuspending(agentCommand: String = config.agentCommand) {
         if (isReadOnly) return
@@ -672,14 +679,24 @@ class SandboxAgentService(
         processManager = manager
         client = acpClient
         trafficLogger = logger
-        // Kept outside the `try`: the last lines the agent wrote are what makes a failed start
-        // readable (see [startupFailureMessage]).
-        val stderrTail = AgentStderrTail()
+        // Kept outside the `try`: the last lines the agent wrote, and how it ended, are what makes a
+        // failed start readable (see [startupFailureMessage]).
+        val agentOutput = AgentOutputTail()
+        val agentExitCode = AtomicReference<Int?>(null)
+        acpClient.onStdoutNoise = { agentOutput.append(it + "\n") }
         try {
-            val healthExitCode = withContext(Dispatchers.IO) { manager.healthCheck() }
-            if (healthExitCode != 0) {
-                throw IllegalStateException(
-                    "Sandbox is not reachable (health check exit code $healthExitCode). Start the sandbox before attaching.",
+            if (!withContext(Dispatchers.IO) { manager.sandboxCommandExists() }) {
+                throw SandboxStartupException(StartupDiagnosis.sandboxCommandMissing(config.sandboxCommand))
+            }
+            val health = withContext(Dispatchers.IO) { manager.healthCheck() }
+            if (!health.succeeded) {
+                throw SandboxStartupException(
+                    StartupDiagnosis.sandboxUnreachable(
+                        config.sandboxCommand,
+                        manager.sandboxName,
+                        health,
+                        SandboxProcessManager.HEALTH_CHECK_TIMEOUT_SECONDS,
+                    ),
                 )
             }
             setState(SessionState.CONNECTING, "Starting agent...")
@@ -691,17 +708,20 @@ class SandboxAgentService(
                     // only sign of life there is: it feeds both the progress message and the idle
                     // timeout of `initialize`.
                     acpClient.noteActivity()
-                    stderrTail.append(chunk)
+                    agentOutput.append(chunk)
                     log.debug("stderr: ${chunk.trimEnd()}")
                 }
 
                 override fun onTerminated(exitCode: Int) {
+                    // Recorded before the pending requests fail, so a failed start sees it.
+                    agentOutput.flush()
+                    agentExitCode.set(exitCode)
                     acpClient.failPending(IllegalStateException("Sandbox process terminated with exit code $exitCode"))
                     cancelPendingRequests()
                     setState(SessionState.DISCONNECTED, "Sandbox process terminated (exit code $exitCode)")
                 }
             })
-            val initialize = withStartupProgress(stderrTail) {
+            val initialize = withStartupProgress(agentOutput) {
                 acpClient.initialize(
                     clientInitializeParams(),
                     idleTimeoutSeconds = config.initializeIdleTimeoutSeconds.toLong(),
@@ -723,7 +743,7 @@ class SandboxAgentService(
             createSessionReporting(acpClient)
         } catch (e: Exception) {
             log.warn("Failed to start the sandbox agent session", e)
-            val message = startupFailureMessage(e, stderrTail)
+            val message = startupFailureMessage(e, manager, agentOutput, agentExitCode.get())
             setState(SessionState.ERROR, message)
             publish(SandboxAgentEvent.Error(message, e))
             closeSession()
@@ -735,13 +755,13 @@ class SandboxAgentService(
      * connection message. Without it the panel shows "Negotiating ACP..." and nothing else for as
      * long as `npx` needs to download the agent, which reads as a freeze.
      */
-    private suspend fun <T> withStartupProgress(stderrTail: AgentStderrTail, block: suspend () -> T): T {
+    private suspend fun <T> withStartupProgress(agentOutput: AgentOutputTail, block: suspend () -> T): T {
         val startedAt = System.currentTimeMillis()
-        setState(SessionState.CONNECTING, startupMessage(startedAt, stderrTail))
+        setState(SessionState.CONNECTING, startupMessage(startedAt, agentOutput))
         val ticker = scope.launch {
             while (true) {
                 delay(STARTUP_TICK_MILLIS)
-                setState(SessionState.CONNECTING, startupMessage(startedAt, stderrTail))
+                setState(SessionState.CONNECTING, startupMessage(startedAt, agentOutput))
             }
         }
         return try {
@@ -752,28 +772,43 @@ class SandboxAgentService(
     }
 
     /** `Negotiating ACP… 42s · <last stderr line>`; the elapsed time alone proves progress. */
-    private fun startupMessage(startedAt: Long, stderrTail: AgentStderrTail): String {
+    private fun startupMessage(startedAt: Long, agentOutput: AgentOutputTail): String {
         val seconds = (System.currentTimeMillis() - startedAt) / 1000
-        val detail = stderrTail.lastLine
+        val detail = agentOutput.lastLine
             ?.let { " · " + it.take(STARTUP_DETAIL_LIMIT) }
             .orEmpty()
         return "Negotiating ACP… ${seconds}s$detail"
     }
 
     /**
-     * Turns a failed attach into something actionable. A bare "initialize timed out" says nothing
-     * about the `npx` download that never finished, while the last `stderr` lines of the agent
-     * usually do.
+     * Turns a failed attach into something actionable. A bare "initialize timed out" or "exit code
+     * 1" says nothing about the `npx` download that never finished or the npm error that ended the
+     * agent, while the last lines the agent wrote usually do. An agent that exited with an error
+     * is followed by a `<launcher> --help` probe, which tells a launcher missing from the sandbox
+     * apart from an agent that failed on its own.
      */
-    private fun startupFailureMessage(error: Throwable, stderrTail: AgentStderrTail): String {
+    private suspend fun startupFailureMessage(
+        error: Throwable,
+        manager: SandboxProcessManager,
+        agentOutput: AgentOutputTail,
+        agentExitCode: Int?,
+    ): String {
         val reason = error.message ?: "Failed to start the sandbox agent session"
-        if (error !is AcpTimeoutException) return reason
-        return buildString {
-            append(reason)
-            append(". The agent may not have finished downloading: retry (the download is cached), ")
-            append("pre-install the agent in the VM, or raise \"Agent startup idle timeout\" in the settings.")
-            val tail = stderrTail.tail(STARTUP_TAIL_LINES)
-            if (tail.isNotEmpty()) append(tail.joinToString("\n", prefix = "\nLast agent output:\n"))
+        val output = agentOutput.tail(StartupDiagnosis.QUOTED_LINES)
+        return when {
+            error is CancellationException -> reason
+            agentExitCode != null -> {
+                val launcherProbe = if (agentExitCode == 0 || manager.launcher.isEmpty()) {
+                    null
+                } else {
+                    // `CONNECTING` keeps a reconnect from starting while the probe still runs.
+                    setState(SessionState.CONNECTING, "Agent exited (code $agentExitCode), checking `${manager.launcher}`...")
+                    withContext(Dispatchers.IO) { runCatching { manager.probeLauncher() }.getOrNull() }
+                }
+                StartupDiagnosis.agentExited(manager.sandboxName, manager.launcher, agentExitCode, launcherProbe, output)
+            }
+            error is AcpTimeoutException -> StartupDiagnosis.agentSilent(reason, output)
+            else -> reason
         }
     }
 
@@ -1910,9 +1945,6 @@ class SandboxAgentService(
 
         /** The status row is one line: a long `npx` progress line is cut instead of stretching it. */
         private const val STARTUP_DETAIL_LIMIT = 120
-
-        /** `stderr` lines quoted in a failed start; enough for the npm error, short enough to read. */
-        private const val STARTUP_TAIL_LINES = 5
 
         /**
          * TTL of the duplicate-open lock (Ph2 SS3.4): long enough that the heartbeat keeps a live

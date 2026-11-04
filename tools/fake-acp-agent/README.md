@@ -18,7 +18,9 @@ project.service<SandboxAgentService>().connect("python3 <repo>/tools/fake-acp-ag
 
 The sandbox still fronts it, so the sandbox named in the settings has to be running and has to see
 the script; the connection health check runs `echo sandbox-agent-connector` through the same sandbox
-and only looks at the exit code, so it passes without the script being involved at all.
+and passes on its exit code, so it passes without the script being involved at all. When the script
+cannot be started, the error quotes what `python3` printed, after a `python3 --help` probe has told
+whether `python3` itself is missing from the sandbox.
 
 ## Colliding session ids
 

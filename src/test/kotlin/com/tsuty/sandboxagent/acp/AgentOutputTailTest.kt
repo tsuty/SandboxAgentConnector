@@ -5,11 +5,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /** Cleanup of the `npx` progress output shown while the agent starts. */
-class AgentStderrTailTest {
+class AgentOutputTailTest {
 
     @Test
     fun `nothing readable yet`() {
-        val tail = AgentStderrTail()
+        val tail = AgentOutputTail()
         assertNull(tail.lastLine)
         assertEquals(emptyList(), tail.tail(3))
 
@@ -20,7 +20,7 @@ class AgentStderrTailTest {
 
     @Test
     fun `chunks are joined and blank lines skipped`() {
-        val tail = AgentStderrTail()
+        val tail = AgentOutputTail()
         tail.append("npm warn depre")
         tail.append("cated request@2.88.2\n\n  \n")
 
@@ -30,7 +30,7 @@ class AgentStderrTailTest {
 
     @Test
     fun `a progress bar rewriting its line yields the newest state`() {
-        val tail = AgentStderrTail()
+        val tail = AgentOutputTail()
         tail.append("\u001B[2Kdownloading 10%\rdownloading 70%\r")
 
         assertEquals("downloading 70%", tail.lastLine)
@@ -39,7 +39,7 @@ class AgentStderrTailTest {
 
     @Test
     fun `only the newest lines are kept`() {
-        val tail = AgentStderrTail(capacity = 2)
+        val tail = AgentOutputTail(capacity = 2)
         tail.append("one\ntwo\nthree\n")
 
         assertEquals(listOf("two", "three"), tail.tail(5))
@@ -47,8 +47,18 @@ class AgentStderrTailTest {
     }
 
     @Test
+    fun `flush keeps the last line of a process that ended without a terminator`() {
+        val tail = AgentOutputTail()
+        tail.append("npm error code E404\nnpm error 404 Not Found")
+        tail.flush()
+        tail.flush()
+
+        assertEquals(listOf("npm error code E404", "npm error 404 Not Found"), tail.tail(5))
+    }
+
+    @Test
     fun `ansi escapes are dropped`() {
-        assertEquals("added 1 package", AgentStderrTail.strip("\u001B[32madded 1 package\u001B[39m "))
-        assertEquals("plain", AgentStderrTail.strip("plain"))
+        assertEquals("added 1 package", AgentOutputTail.strip("\u001B[32madded 1 package\u001B[39m "))
+        assertEquals("plain", AgentOutputTail.strip("plain"))
     }
 }

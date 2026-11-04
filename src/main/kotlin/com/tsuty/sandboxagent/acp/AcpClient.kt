@@ -125,6 +125,12 @@ class AcpClient(
         lastActivityAt = System.nanoTime()
     }
 
+    /**
+     * Non-blank `stdout` lines that are not JSON-RPC. The protocol skips them, but an agent that
+     * fails to start may explain why there.
+     */
+    var onStdoutNoise: ((String) -> Unit)? = null
+
     /** Notifications pushed by the agent (`session/update`, ...). */
     var onNotification: ((JsonRpcNotification) -> Unit)? = null
 
@@ -435,7 +441,10 @@ class AcpClient(
         val incoming = parseAcpLine(line, json)
         if (incoming != null) trafficLogger?.logIncoming(line.trim())
         when (incoming) {
-            null -> if (line.isNotBlank()) log.debug("Skipping non-JSON stdout line: $line")
+            null -> if (line.isNotBlank()) {
+                log.debug("Skipping non-JSON stdout line: $line")
+                onStdoutNoise?.invoke(line)
+            }
             is AcpIncoming.Response -> {
                 val future = pending.remove(incoming.response.id.key)
                 if (future == null) {
@@ -466,13 +475,17 @@ class AcpClient(
 
     /** Fails every request still waiting for a response, e.g. when the sandbox process dies. */
     fun failPending(reason: Throwable) {
+        // First: the last line of a dying agent, written without a terminator, may be the one that
+        // explains why, and whoever awaits the requests failed below reads it right away.
+        lineAccumulator.flush()
+            ?.takeIf { it.isNotBlank() && parseAcpLine(it, json) == null }
+            ?.let { onStdoutNoise?.invoke(it) }
         val iterator = pending.entries.iterator()
         while (iterator.hasNext()) {
             val entry = iterator.next()
             iterator.remove()
             entry.value.completeExceptionally(reason)
         }
-        lineAccumulator.flush()
     }
 
     companion object {
