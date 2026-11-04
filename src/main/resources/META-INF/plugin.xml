@@ -76,6 +76,16 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.0.6</h3>
+    <ul>
+        <li>A failed agent start explains why: a sandbox command missing from the <code>PATH</code>, a sandbox that does
+            not answer within 60 seconds, an agent that exits before the connection is up, or a launcher such as
+            <code>npx</code> or <code>uvx</code> missing from the sandbox, with what the sandbox CLI or the agent printed.</li>
+        <li>Backups can be deleted: <code>Delete Backup</code> in the Read Only tab of a backup moves it aside (it is still
+            found by <code>Search Local Sessions</code> with <code>Include deleted sessions</code>), and
+            <code>Delete Backups Permanently…</code> in the submenu of a session in the session list erases all of its
+            backups after a confirmation. Read Only tabs showing a deleted file are closed.</li>
+    </ul>
     <h3>0.0.5</h3>
     <ul>
         <li>Questions of the agent are rendered as Markdown, in the form and in the tool call row of the question:
