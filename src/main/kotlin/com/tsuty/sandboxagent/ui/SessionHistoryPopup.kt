@@ -132,15 +132,21 @@ class SessionHistoryPopupStep(
     }
 }
 
-/** What the submenu of a session row offers; [BACKUPS] only while the session has any. */
+/**
+ * What the submenu of a session row offers; [BACKUPS] only while the session has backups,
+ * [DELETE_BACKUPS] while it has backups or deleted backups.
+ */
 enum class SessionRowAction(val title: String, val icon: Icon) {
     RENAME("Rename", AllIcons.Actions.Edit),
     DELETE("Delete", AllIcons.Actions.GC),
     BACKUPS("Backups", AllIcons.Nodes.CopyOfFolder),
+    DELETE_BACKUPS("Delete Backups Permanently…", AllIcons.General.Remove),
 }
 
 /**
- * The submenu of one session row: `Rename`, `Delete` and, when there are any, `Backups ▶`.
+ * The submenu of one session row: `Rename`, `Delete` and, when there are any, `Backups ▶` and
+ * `Delete Backups Permanently…`. [backups] are the ones listed; [permanentlyDeletable] every
+ * backup and deleted backup of the session, which is what the permanent deletion erases.
  *
  * It has no title: it opens right next to the hovered row, which stays selected, so repeating the
  * session name would only say twice what the row already shows.
@@ -149,9 +155,16 @@ class SessionRowActionsStep(
     private val backups: List<LocalSessionFile>,
     private val onAction: (SessionRowAction) -> Unit,
     private val onOpenBackup: (LocalSessionFile) -> Unit,
+    permanentlyDeletable: List<LocalSessionFile> = emptyList(),
 ) : BaseListPopupStep<SessionRowAction>(
     null,
-    SessionRowAction.entries.filter { it != SessionRowAction.BACKUPS || backups.isNotEmpty() },
+    SessionRowAction.entries.filter { action ->
+        when (action) {
+            SessionRowAction.BACKUPS -> backups.isNotEmpty()
+            SessionRowAction.DELETE_BACKUPS -> permanentlyDeletable.isNotEmpty()
+            else -> true
+        }
+    },
 ) {
     override fun getTextFor(value: SessionRowAction): String = value.title
 
@@ -163,7 +176,7 @@ class SessionRowActionsStep(
 
     override fun onChosen(selectedValue: SessionRowAction, finalChoice: Boolean): PopupStep<*>? {
         if (selectedValue == SessionRowAction.BACKUPS) return BackupsStep(backups, onOpenBackup)
-        // The dialogs of both actions are modal, so they are opened once the popups are gone.
+        // The dialogs of the actions are modal, so they are opened once the popups are gone.
         if (finalChoice) doFinalStep { onAction(selectedValue) }
         return FINAL_CHOICE
     }
@@ -185,8 +198,8 @@ class BackupsStep(
 
     companion object {
         /**
-         * Backups listed at most, the newest ones. Only the list is capped: no backup file is ever
-         * deleted, and the older ones stay reachable through the local session search.
+         * Backups listed at most, the newest ones. Only the list is capped: no backup file is
+         * deleted to fit it, and the older ones stay reachable through the local session search.
          */
         const val MAX_LISTED_BACKUPS: Int = 20
     }
@@ -254,6 +267,7 @@ object SessionHistoryPopup {
             index = index,
             currentSessionId = service.sessionId,
             rowActions = { entry ->
+                val permanentlyDeletable = index.permanentlyDeletableBackups(entry.sessionId)
                 SessionRowActionsStep(
                     backups = index.listedBackups(entry.sessionId),
                     onAction = { action ->
@@ -261,9 +275,12 @@ object SessionHistoryPopup {
                             SessionRowAction.RENAME -> SessionActions.rename(project, service, entry)
                             SessionRowAction.DELETE -> SessionActions.delete(project, service, entry)
                             SessionRowAction.BACKUPS -> Unit
+                            SessionRowAction.DELETE_BACKUPS ->
+                                BackupActions.deleteBackupsPermanently(project, entry.sessionId, entry.presentableTitle())
                         }
                     },
                     onOpenBackup = onOpenReadOnly,
+                    permanentlyDeletable = permanentlyDeletable,
                 )
             },
         )

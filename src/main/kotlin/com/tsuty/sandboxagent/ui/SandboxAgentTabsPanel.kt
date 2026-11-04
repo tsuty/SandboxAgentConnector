@@ -20,6 +20,7 @@ import com.tsuty.sandboxagent.service.SandboxAgentEventListener
 import com.tsuty.sandboxagent.service.SandboxAgentService
 import com.tsuty.sandboxagent.service.SessionState
 import com.tsuty.sandboxagent.session.LocalSessionFile
+import com.tsuty.sandboxagent.session.LocalSessionFileEvents
 import com.tsuty.sandboxagent.session.LocalSessionKind
 import com.tsuty.sandboxagent.session.LocalSessionSearchResult
 import com.tsuty.sandboxagent.session.RecentSession
@@ -36,6 +37,7 @@ import java.awt.Point
 import java.awt.event.InputEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.io.File
 import javax.swing.Icon
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -125,6 +127,11 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
                     if (showingRecent) recentSessions.refresh()
                 }
             },
+        )
+        // A Read Only tab shows a file the user just deleted, from this tab or from anywhere else.
+        project.messageBus.connect(this).subscribe(
+            LocalSessionFileEvents.TOPIC,
+            LocalSessionFileEvents.Listener { files -> onEdt { closeReadOnlyTabsOf(files) } },
         )
         // No tab is opened on its own: nothing connects until a session or an agent is picked,
         // and the recent sessions of every agent are what the tool window starts with.
@@ -313,6 +320,14 @@ class SandboxAgentTabsPanel(private val project: Project) : JPanel(BorderLayout(
                 addReadOnlyTab(ReadOnlySource(file, snapshot, title))
             }
         }
+    }
+
+    /** Closes every Read Only tab showing one of [files] (absolute, see [LocalSessionFileEvents]). */
+    private fun closeReadOnlyTabsOf(files: Set<File>) {
+        if (disposed) return
+        controller.tabs
+            .filter { tab -> tab.service.readOnlySource?.file?.file?.absoluteFile in files }
+            .forEach(::closeTab)
     }
 
     private fun addReadOnlyTab(source: ReadOnlySource) {

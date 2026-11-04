@@ -23,7 +23,7 @@ internal object LocalSessionPresentation {
      */
     fun agentNotEnabledStatus(agentName: String): String = "Agent not enabled · $agentName"
 
-    /** `Backup · {date}` / `Deleted · {date}`, the status of a Read Only tab. */
+    /** `Backup · {date}` / `Deleted backup · {date}` / `Deleted · {date}`, the status of a Read Only tab. */
     fun readOnlyStatus(file: LocalSessionFile, zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()): String {
         val date = file.timestamp?.let { dateTime(it, zone, locale) }
         return listOfNotNull(kindLabel(file.kind), date).joinToString(" · ")
@@ -33,6 +33,7 @@ internal object LocalSessionPresentation {
         LocalSessionKind.CURRENT -> "Local"
         LocalSessionKind.BACKUP -> "Backup"
         LocalSessionKind.DELETED -> "Deleted"
+        LocalSessionKind.DELETED_BACKUP -> "Deleted backup"
     }
 
     /** An epoch millis timestamp in the medium, localized form of the user's locale. */
@@ -53,10 +54,13 @@ internal object LocalSessionPresentation {
         StorageState.REMOTE_ONLY -> AllIcons.Nodes.ExtractedFolder
     }
 
-    /** Icon of a search result: the storage icons for current / backup files, a bin for deleted ones. */
+    /**
+     * Icon of a search result: the storage icons for current / backup files, a bin for deleted
+     * sessions and deleted backups alike (the kind label of the row tells the two apart).
+     */
     fun kindIcon(kind: LocalSessionKind): Icon = when (kind) {
         LocalSessionKind.CURRENT -> AllIcons.Nodes.Folder
         LocalSessionKind.BACKUP -> AllIcons.Nodes.CopyOfFolder
-        LocalSessionKind.DELETED -> AllIcons.Actions.GC
+        LocalSessionKind.DELETED, LocalSessionKind.DELETED_BACKUP -> AllIcons.Actions.GC
     }
 }

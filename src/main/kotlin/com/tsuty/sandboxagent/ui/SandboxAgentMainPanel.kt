@@ -102,6 +102,14 @@ class SandboxAgentMainPanel(
         ShowSettingsUtil.getInstance().showSettingsDialog(project, SandboxAgentSettingsConfigurable::class.java)
     }.apply { isVisible = false }
 
+    /**
+     * Shown in the Read Only tab of a backup: the backup is moved aside as a deleted backup, and
+     * this tab is closed with every other one showing it (see [BackupActions.deleteBackup]).
+     */
+    private val deleteBackupLink = ActionLink("Delete Backup") {
+        service.readOnlySource?.file?.let { BackupActions.deleteBackup(project, it) }
+    }.apply { isVisible = false }
+
     private val messageLabel = JBLabel().apply {
         font = JBUI.Fonts.smallFont()
         foreground = UIUtil.getContextHelpForeground()
@@ -255,6 +263,7 @@ class SandboxAgentMainPanel(
         left.add(statusLabel, labels)
         left.add(messageLabel, labels.apply { insets = JBUI.insetsLeft(ACTION_BAR_GAP * 2) })
         left.add(enableAgentLink, labels)
+        left.add(deleteBackupLink, labels)
 
         val right = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(ACTION_BAR_GAP), 0))
         right.isOpaque = false
@@ -685,6 +694,7 @@ class SandboxAgentMainPanel(
                 LocalSessionPresentation.readOnlyStatus(source.file)
             }
             enableAgentLink.isVisible = agentNotEnabled
+            deleteBackupLink.isVisible = source.file.kind == LocalSessionKind.BACKUP
             messageLabel.icon = null
             messageLabel.text = ""
             return

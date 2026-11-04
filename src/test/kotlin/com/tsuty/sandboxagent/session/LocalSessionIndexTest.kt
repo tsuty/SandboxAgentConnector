@@ -14,15 +14,21 @@ import kotlin.test.assertTrue
 class LocalSessionIndexTest {
 
     @Test
-    fun `the three file name forms are parsed and anything else is rejected`() {
+    fun `the four file name forms are parsed and anything else is rejected`() {
         assertEquals(Triple("sess_1", LocalSessionKind.CURRENT, null), LocalSessionIndex.parse("sess_1.json"))
         assertEquals(Triple("sess_1", LocalSessionKind.BACKUP, 123L), LocalSessionIndex.parse("sess_1.json.123.backup"))
         assertEquals(Triple("sess_1", LocalSessionKind.DELETED, 456L), LocalSessionIndex.parse("sess_1.json.456.deleted"))
+        assertEquals(
+            Triple("sess_1", LocalSessionKind.DELETED_BACKUP, 789L),
+            LocalSessionIndex.parse("sess_1.json.789.deleted-backup"),
+        )
         assertEquals(Triple("a.b", LocalSessionKind.CURRENT, null), LocalSessionIndex.parse("a.b.json"))
 
         assertNull(LocalSessionIndex.parse("sess_1.json1234567.tmp"))
         assertNull(LocalSessionIndex.parse("sess_1.json.abc.backup"))
         assertNull(LocalSessionIndex.parse("sess_1.json.123.backup.tmp"))
+        assertNull(LocalSessionIndex.parse("sess_1.json.123.deleted-backup.tmp"))
+        assertNull(LocalSessionIndex.parse("sess_1.json.abc.deleted-backup"))
         assertNull(LocalSessionIndex.parse(".json"))
         assertNull(LocalSessionIndex.parse("notes.txt"))
     }
@@ -90,13 +96,16 @@ class LocalSessionIndexTest {
 
     @Test
     fun `searchable files include deleted ones only on request`() {
-        val index = LocalSessionIndex.scan(directoryWith("a.json", "a.json.1.backup", "b.json.2.deleted"))
+        val index = LocalSessionIndex.scan(
+            directoryWith("a.json", "a.json.1.backup", "a.json.3.deleted-backup", "b.json.2.deleted"),
+        )
 
         assertEquals(
             setOf(LocalSessionKind.CURRENT, LocalSessionKind.BACKUP),
             index.searchable(includeDeleted = false).map { it.kind }.toSet(),
         )
-        assertEquals(3, index.searchable(includeDeleted = true).size)
+        assertEquals(4, index.searchable(includeDeleted = true).size)
+        assertTrue(index.searchable(includeDeleted = true).any { it.kind == LocalSessionKind.DELETED_BACKUP })
     }
 
     @Test
@@ -109,6 +118,57 @@ class LocalSessionIndexTest {
         assertFalse(index.isDeleted("back"))
         assertFalse(index.isDeleted("kept"))
         assertFalse(index.isDeleted("unknown"))
+    }
+
+    @Test
+    fun `deleted backups are kept apart and never make the session count as deleted`() {
+        val index = LocalSessionIndex.scan(
+            directoryWith(
+                "a.json",
+                "a.json.1.backup",
+                "a.json.2.deleted-backup",
+                "a.json.3.deleted-backup",
+                "b.json.4.deleted-backup",
+            ),
+        )
+
+        val files = assertNotNull(index.of("a"))
+        assertEquals(listOf(1L), files.backups.map { it.timestamp })
+        assertEquals(listOf(3L, 2L), files.deletedBackups.map { it.timestamp })
+        assertTrue(files.deleted.isEmpty())
+        // Not listed among the backups, and the session is not deleted.
+        assertEquals(listOf(1L), index.listedBackups("a").map { it.timestamp })
+        assertEquals(StorageState.LOCAL_WITH_BACKUP, index.storageState("a"))
+        assertFalse(index.isDeleted("a"))
+        assertFalse(index.isDeleted("b"))
+    }
+
+    @Test
+    fun `the permanent deletion covers every backup and deleted backup of a local session`() {
+        val backups = (1..25).map { "a.json.$it.backup" }.toTypedArray()
+        val index = LocalSessionIndex.scan(
+            directoryWith(
+                "a.json",
+                *backups,
+                "a.json.30.deleted-backup",
+                "a.json.40.deleted",
+                "only.json",
+                "only.json.5.deleted-backup",
+                "gone.json.6.backup",
+                "gone.json.7.deleted-backup",
+                "plain.json",
+            ),
+        )
+
+        val a = index.permanentlyDeletableBackups("a")
+        assertEquals(26, a.size)
+        assertEquals(setOf(LocalSessionKind.BACKUP, LocalSessionKind.DELETED_BACKUP), a.map { it.kind }.toSet())
+        // Every backup was moved aside one by one: the deleted ones are still offered.
+        assertEquals(listOf(5L), index.permanentlyDeletableBackups("only").map { it.timestamp })
+        // Without the current snapshot, as for the listed backups.
+        assertTrue(index.permanentlyDeletableBackups("gone").isEmpty())
+        assertTrue(index.permanentlyDeletableBackups("plain").isEmpty())
+        assertTrue(index.permanentlyDeletableBackups("missing").isEmpty())
     }
 
     @Test

@@ -137,6 +137,9 @@ enum class SaveResult {
     FAILED,
 }
 
+/** Outcome of [SessionSnapshotStore.deleteBackupsPermanently]: the files erased and those left. */
+data class PermanentDeletion(val deleted: List<File>, val failed: List<File>)
+
 /**
  * Per version upgrade of a raw snapshot document.
  *
@@ -221,8 +224,8 @@ class SessionSnapshotStore(
     /**
      * The agent owning a local file of [sessionId] when that is not [agent], or `null` when no
      * other agent owns any. The current snapshot decides as soon as there is one — every backup
-     * of it was copied from it — and only without one are the backups and the deleted files
-     * read, which is the first save of a session and nothing more.
+     * of it was copied from it — and only without one are the backups, the deleted files and the
+     * deleted backups read, which is the first save of a session and nothing more.
      */
     @Synchronized
     fun conflictingOwner(sessionId: String, agent: SnapshotAgent): String? {
@@ -230,7 +233,7 @@ class SessionSnapshotStore(
             return current.ownerAgentId(agent.legacyId).takeIf { it != agent.id }
         }
         val files = LocalSessionIndex.scan(directory).of(sessionId) ?: return null
-        return (files.backups + files.deleted).firstNotNullOfOrNull { file ->
+        return (files.backups + files.deleted + files.deletedBackups).firstNotNullOfOrNull { file ->
             read(file.file)?.ownerAgentId(agent.legacyId)?.takeIf { it != agent.id }
         }
     }
@@ -375,13 +378,14 @@ class SessionSnapshotStore(
      * Backups are part of the session: left as `.backup`, a deleted session would keep showing up
      * in a search that does not include deleted sessions. The snapshot goes first, and a failure
      * there leaves the backups alone, so the session is never half visible because of this call.
+     * Deleted backups ([moveBackupToDeleted]) are already out of that search and stay as they are.
      */
     @Synchronized
     fun moveToDeleted(sessionId: String) {
         val source = fileOf(sessionId)
         if (source.isFile) {
             try {
-                moveAtomically(source.toPath(), freeDeletedSibling(sessionId, clock()).toPath())
+                moveAtomically(source.toPath(), freeSibling(sanitize(sessionId), clock(), DELETED_SUFFIX).toPath())
             } catch (e: Exception) {
                 log.warn("Failed to move the session snapshot of $sessionId aside", e)
                 return
@@ -389,7 +393,7 @@ class SessionSnapshotStore(
         }
         LocalSessionIndex.scan(directory).of(sessionId)?.backups?.forEach { backup ->
             try {
-                val target = freeDeletedSibling(sessionId, backup.timestamp ?: clock())
+                val target = freeSibling(backup.sanitizedId, backup.timestamp ?: clock(), DELETED_SUFFIX)
                 moveAtomically(backup.file.toPath(), target.toPath())
             } catch (e: Exception) {
                 log.warn("Failed to move the backup ${backup.file.name} aside", e)
@@ -397,13 +401,67 @@ class SessionSnapshotStore(
         }
     }
 
-    /** `{id}.json.{timestamp}.deleted`, moved on by a millisecond while that name is taken. */
-    private fun freeDeletedSibling(sessionId: String, timestamp: Long): File {
+    /**
+     * Deletes one backup without erasing it: [backup] is renamed to
+     * `{id}.json.{backupEpochMillis}.deleted-backup`, keeping the time it was taken at. Returns the
+     * new file, or `null` when [backup] is not a backup of this directory (any more) or the move
+     * failed.
+     */
+    @Synchronized
+    fun moveBackupToDeleted(backup: File): File? {
+        val file = ownFile(backup, setOf(LocalSessionKind.BACKUP)) ?: return null
+        return try {
+            val target = freeSibling(file.sanitizedId, file.timestamp ?: clock(), DELETED_BACKUP_SUFFIX)
+            moveAtomically(file.file.toPath(), target.toPath())
+            target
+        } catch (e: Exception) {
+            log.warn("Failed to move the backup ${backup.name} aside", e)
+            null
+        }
+    }
+
+    /**
+     * Erases [files] for good — the backups and deleted backups of [sessionId] counted for the
+     * confirmation, so a backup made since is kept. A file that is no longer such a file of
+     * [sessionId] is left alone, and one that cannot be erased is logged: both end up in
+     * [PermanentDeletion.failed], unless the file is simply gone already.
+     */
+    @Synchronized
+    fun deleteBackupsPermanently(sessionId: String, files: List<File>): PermanentDeletion {
+        val deleted = mutableListOf<File>()
+        val failed = mutableListOf<File>()
+        files.forEach { requested ->
+            val file = ownFile(requested, setOf(LocalSessionKind.BACKUP, LocalSessionKind.DELETED_BACKUP))
+            if (file == null || file.sanitizedId != sanitize(sessionId)) {
+                if (requested.exists()) failed += requested
+                return@forEach
+            }
+            try {
+                Files.deleteIfExists(file.file.toPath())
+                deleted += file.file
+            } catch (e: Exception) {
+                log.warn("Failed to delete the backup ${requested.name}", e)
+                failed += requested
+            }
+        }
+        return PermanentDeletion(deleted, failed)
+    }
+
+    /** [file] read as a file of this directory of one of [kinds], or `null`. */
+    private fun ownFile(file: File, kinds: Set<LocalSessionKind>): LocalSessionFile? {
+        if (file.absoluteFile.parentFile != directory.absoluteFile || !file.isFile) return null
+        val (id, kind, timestamp) = LocalSessionIndex.parse(file.name) ?: return null
+        if (kind !in kinds) return null
+        return LocalSessionFile(file, id, kind, timestamp, file.length())
+    }
+
+    /** `{id}.json.{timestamp}.{suffix}`, moved on by a millisecond while that name is taken. */
+    private fun freeSibling(sanitizedId: String, timestamp: Long, suffix: String): File {
         var current = timestamp
-        var target = siblingOf(sessionId, current, DELETED_SUFFIX)
+        var target = sanitizedSiblingOf(sanitizedId, current, suffix)
         while (target.exists()) {
             current += 1
-            target = siblingOf(sessionId, current, DELETED_SUFFIX)
+            target = sanitizedSiblingOf(sanitizedId, current, suffix)
         }
         return target
     }
@@ -432,7 +490,10 @@ class SessionSnapshotStore(
     fun index(): LocalSessionIndex = LocalSessionIndex.scan(directory)
 
     private fun siblingOf(sessionId: String, timestamp: Long, suffix: String): File =
-        File(directory, "${sanitize(sessionId)}.json.$timestamp.$suffix")
+        sanitizedSiblingOf(sanitize(sessionId), timestamp, suffix)
+
+    private fun sanitizedSiblingOf(sanitizedId: String, timestamp: Long, suffix: String): File =
+        File(directory, "$sanitizedId.json.$timestamp.$suffix")
 
     /** `ATOMIC_MOVE` is unsupported on a few file systems, where a plain replace is the best effort. */
     private fun moveAtomically(source: Path, target: Path) {
@@ -463,6 +524,7 @@ class SessionSnapshotStore(
 
         private const val BACKUP_SUFFIX = "backup"
         private const val DELETED_SUFFIX = "deleted"
+        private const val DELETED_BACKUP_SUFFIX = "deleted-backup"
 
         private val ILLEGAL_FILENAME_CHARS = Regex("[^A-Za-z0-9_.-]")
 

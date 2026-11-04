@@ -3,14 +3,14 @@ package com.tsuty.sandboxagent.session
 import java.io.File
 
 /** What a file of the session directory holds (see [LocalSessionIndex.parse]). */
-enum class LocalSessionKind { CURRENT, BACKUP, DELETED }
+enum class LocalSessionKind { CURRENT, BACKUP, DELETED, DELETED_BACKUP }
 
 /** How much of a listed session is kept locally, shown as the icon of the session list rows. */
 enum class StorageState { LOCAL, LOCAL_WITH_BACKUP, REMOTE_ONLY }
 
 /**
  * One file of the session directory. [timestamp] is the epoch millis encoded in the name of a
- * backup / deleted file, and `null` for the current snapshot.
+ * backup / deleted / deleted backup file, and `null` for the current snapshot.
  */
 data class LocalSessionFile(
     val file: File,
@@ -23,18 +23,23 @@ data class LocalSessionFile(
     val sizeKb: Long get() = (sizeBytes + 1023) / 1024
 }
 
-/** Every local file of one session; [backups] and [deleted] are sorted newest first. */
+/**
+ * Every local file of one session, each list sorted newest first. [deleted] holds what deleting
+ * the session moved aside; [deletedBackups] the backups the user deleted one by one, which never
+ * make the session itself count as deleted.
+ */
 data class LocalSessionFiles(
     val current: LocalSessionFile?,
     val backups: List<LocalSessionFile>,
     val deleted: List<LocalSessionFile>,
+    val deletedBackups: List<LocalSessionFile> = emptyList(),
 )
 
 /**
  * The content of the session directory, read with a single `list()` call, so the session list can
  * tell for every row whether a snapshot / backups exist without touching the disk per row.
  *
- * Only the three names written by [SessionSnapshotStore] are recognised; everything else (the
+ * Only the four names written by [SessionSnapshotStore] are recognised; everything else (the
  * `.tmp` files of an interrupted save in particular) is ignored.
  */
 class LocalSessionIndex(val bySanitizedId: Map<String, LocalSessionFiles>) {
@@ -66,6 +71,16 @@ class LocalSessionIndex(val bySanitizedId: Map<String, LocalSessionFiles>) {
     }
 
     /**
+     * The files `Delete Backups Permanently…` erases for [sessionId]: its backups and deleted
+     * backups, every one of them, not only the listed newest. None unless the current snapshot
+     * exists, in line with [listedBackups].
+     */
+    fun permanentlyDeletableBackups(sessionId: String): List<LocalSessionFile> {
+        val files = of(sessionId) ?: return emptyList()
+        return if (files.current == null) emptyList() else files.backups + files.deletedBackups
+    }
+
+    /**
      * `true` when [sessionId] was deleted in the IDE: its files were moved aside and no current
      * snapshot was written since. The session list leaves such a session out even when the agent
      * still lists it, because it lacks `session/delete` or failed to run it.
@@ -85,16 +100,21 @@ class LocalSessionIndex(val bySanitizedId: Map<String, LocalSessionFiles>) {
         return LocalSessionIndex(bySanitizedId.filterKeys { it !in excluded })
     }
 
-    /** The files the local session search reads: current snapshots and backups, deleted ones on request. */
+    /**
+     * The files the local session search reads: current snapshots and backups, deleted sessions
+     * and deleted backups on request.
+     */
     fun searchable(includeDeleted: Boolean): List<LocalSessionFile> =
         bySanitizedId.values.flatMap { files ->
-            listOfNotNull(files.current) + files.backups + (if (includeDeleted) files.deleted else emptyList())
+            listOfNotNull(files.current) + files.backups +
+                (if (includeDeleted) files.deleted + files.deletedBackups else emptyList())
         }
 
     companion object {
         private val CURRENT = Regex("^(.+)\\.json$")
         private val BACKUP = Regex("^(.+)\\.json\\.(\\d+)\\.backup$")
         private val DELETED = Regex("^(.+)\\.json\\.(\\d+)\\.deleted$")
+        private val DELETED_BACKUP = Regex("^(.+)\\.json\\.(\\d+)\\.deleted-backup$")
 
         val EMPTY: LocalSessionIndex = LocalSessionIndex(emptyMap())
 
@@ -107,6 +127,10 @@ class LocalSessionIndex(val bySanitizedId: Map<String, LocalSessionFiles>) {
             DELETED.matchEntire(name)?.let { match ->
                 val timestamp = match.groupValues[2].toLongOrNull() ?: return null
                 return Triple(match.groupValues[1], LocalSessionKind.DELETED, timestamp)
+            }
+            DELETED_BACKUP.matchEntire(name)?.let { match ->
+                val timestamp = match.groupValues[2].toLongOrNull() ?: return null
+                return Triple(match.groupValues[1], LocalSessionKind.DELETED_BACKUP, timestamp)
             }
             CURRENT.matchEntire(name)?.let { match ->
                 return Triple(match.groupValues[1], LocalSessionKind.CURRENT, null)
@@ -130,6 +154,8 @@ class LocalSessionIndex(val bySanitizedId: Map<String, LocalSessionFiles>) {
                     current = group.firstOrNull { it.kind == LocalSessionKind.CURRENT },
                     backups = group.filter { it.kind == LocalSessionKind.BACKUP }.sortedByDescending { it.timestamp },
                     deleted = group.filter { it.kind == LocalSessionKind.DELETED }.sortedByDescending { it.timestamp },
+                    deletedBackups = group.filter { it.kind == LocalSessionKind.DELETED_BACKUP }
+                        .sortedByDescending { it.timestamp },
                 )
             }
             return LocalSessionIndex(grouped)

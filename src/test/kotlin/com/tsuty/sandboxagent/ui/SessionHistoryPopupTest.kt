@@ -133,6 +133,43 @@ class SessionHistoryPopupTest {
     }
 
     @Test
+    fun `the permanent deletion is offered while there are backups or deleted backups`() {
+        val backup = file("sess_1", LocalSessionKind.BACKUP, 1)
+        val deletedBackup = file("sess_1", LocalSessionKind.DELETED_BACKUP, 2)
+        val both = SessionRowActionsStep(listOf(backup), {}, {}, permanentlyDeletable = listOf(backup, deletedBackup))
+        // Every backup was deleted one by one: nothing to list, but still something to erase.
+        val onlyDeleted = SessionRowActionsStep(emptyList(), {}, {}, permanentlyDeletable = listOf(deletedBackup))
+        var chosen: SessionRowAction? = null
+        val step = SessionRowActionsStep(emptyList(), { chosen = it }, {}, permanentlyDeletable = listOf(deletedBackup))
+
+        assertEquals(
+            listOf("Rename", "Delete", "Backups", "Delete Backups Permanently…"),
+            both.values.map { both.getTextFor(it) },
+        )
+        assertEquals(listOf("Rename", "Delete", "Delete Backups Permanently…"), onlyDeleted.values.map { onlyDeleted.getTextFor(it) })
+        assertTrue(step.isFinal(SessionRowAction.DELETE_BACKUPS))
+        assertFalse(step.hasSubstep(SessionRowAction.DELETE_BACKUPS))
+        assertSame(PopupStep.FINAL_CHOICE, step.onChosen(SessionRowAction.DELETE_BACKUPS, true))
+        // Run once the popup is gone, which never happens here.
+        assertNull(chosen)
+    }
+
+    @Test
+    fun `the permanent deletion names the session, the count and the deleted backups among them`() {
+        val backup = file("sess_1", LocalSessionKind.BACKUP, 1)
+        val deletedBackup = file("sess_1", LocalSessionKind.DELETED_BACKUP, 2)
+
+        assertEquals(
+            "Permanently delete 1 backup of \"Fix\"?\nThis cannot be undone.",
+            BackupActions.permanentDeletionMessage("Fix", listOf(backup)),
+        )
+        assertEquals(
+            "Permanently delete 3 backups of \"Fix\" (2 of them already deleted)?\nThis cannot be undone.",
+            BackupActions.permanentDeletionMessage("Fix", listOf(backup, deletedBackup, deletedBackup)),
+        )
+    }
+
+    @Test
     fun `backups are listed newest first with their date and size in whole kilobytes`() {
         val older = file("sess_1", LocalSessionKind.BACKUP, 1_000L, size = 1)
         val newer = file("sess_1", LocalSessionKind.BACKUP, 2_000L, size = 2_049)
@@ -163,6 +200,8 @@ class SessionHistoryPopupTest {
 
         assertEquals("Backup · $date", LocalSessionPresentation.readOnlyStatus(backup, ZoneOffset.UTC, Locale.US))
         assertEquals("Deleted · $date", LocalSessionPresentation.readOnlyStatus(deleted, ZoneOffset.UTC, Locale.US))
+        val deletedBackup = file("sess_1", LocalSessionKind.DELETED_BACKUP, 2_000L)
+        assertEquals("Deleted backup · $date", LocalSessionPresentation.readOnlyStatus(deletedBackup, ZoneOffset.UTC, Locale.US))
     }
 
     @Test

@@ -336,6 +336,120 @@ class SessionSnapshotStoreTest {
     }
 
     @Test
+    fun `deleting one backup renames it to a deleted backup with the time it was taken at`() {
+        val (store, directory) = tickingStore()
+        store.save("sess_1", listOf(UserMessageEntry("hi")))
+        store.backUpByReplay("sess_1", "m1")
+        store.backUpByReplay("sess_1", "m2")
+        val (newer, older) = assertNotNull(store.index().of("sess_1")).backups
+
+        val moved = assertNotNull(store.moveBackupToDeleted(older.file))
+
+        assertEquals("sess_1.json.${older.timestamp}.deleted-backup", moved.name)
+        assertFalse(older.file.exists())
+        assertNotNull(store.loadFile(moved))
+        val files = assertNotNull(store.index().of("sess_1"))
+        assertEquals(listOf(newer), files.backups)
+        assertEquals(listOf(older.timestamp), files.deletedBackups.map { it.timestamp })
+        assertTrue(files.deleted.isEmpty())
+        assertTrue("sess_1.json" in directory.names())
+    }
+
+    @Test
+    fun `deleting a backup moves on by a millisecond while the name is taken`() {
+        val (store, directory) = tempStore()
+        directory.mkdirs()
+        File(directory, "sess_1.json.5.backup").writeText("{}")
+        File(directory, "sess_1.json.5.deleted-backup").writeText("{}")
+
+        val moved = assertNotNull(store.moveBackupToDeleted(File(directory, "sess_1.json.5.backup")))
+
+        assertEquals("sess_1.json.6.deleted-backup", moved.name)
+        assertEquals(listOf("sess_1.json.5.deleted-backup", "sess_1.json.6.deleted-backup"), directory.names())
+    }
+
+    @Test
+    fun `only a backup of the store's own directory is moved to deleted`() {
+        val (store, directory) = tempStore()
+        directory.mkdirs()
+        listOf("sess_1.json", "sess_1.json.5.deleted", "sess_1.json.6.deleted-backup").forEach {
+            File(directory, it).writeText("{}")
+        }
+        val elsewhere = Files.createTempDirectory("elsewhere").toFile()
+        val foreign = File(elsewhere, "sess_1.json.7.backup").apply { writeText("{}") }
+
+        assertNull(store.moveBackupToDeleted(File(directory, "sess_1.json")))
+        assertNull(store.moveBackupToDeleted(File(directory, "sess_1.json.5.deleted")))
+        assertNull(store.moveBackupToDeleted(File(directory, "sess_1.json.6.deleted-backup")))
+        assertNull(store.moveBackupToDeleted(File(directory, "sess_1.json.8.backup")))
+        assertNull(store.moveBackupToDeleted(foreign))
+        assertTrue(foreign.exists())
+        assertEquals(listOf("sess_1.json", "sess_1.json.5.deleted", "sess_1.json.6.deleted-backup"), directory.names())
+    }
+
+    @Test
+    fun `deleting a session leaves its deleted backups as they are`() {
+        val (store, directory) = tempStore()
+        directory.mkdirs()
+        File(directory, "sess_1.json.5.backup").writeText("{}")
+        File(directory, "sess_1.json.6.deleted-backup").writeText("{}")
+
+        store.moveToDeleted("sess_1")
+
+        assertEquals(listOf("sess_1.json.5.deleted", "sess_1.json.6.deleted-backup"), directory.names())
+    }
+
+    @Test
+    fun `the permanent deletion erases exactly the requested backups of the session`() {
+        val (store, directory) = tempStore()
+        directory.mkdirs()
+        val names = listOf(
+            "sess_1.json",
+            "sess_1.json.1.backup",
+            "sess_1.json.2.deleted-backup",
+            "sess_1.json.3.backup",
+            "sess_1.json.4.deleted",
+            "sess_2.json.5.backup",
+        )
+        names.forEach { File(directory, it).writeText("{}") }
+        fun f(name: String) = File(directory, name)
+
+        val result = store.deleteBackupsPermanently(
+            "sess_1",
+            listOf(
+                f("sess_1.json.1.backup"),
+                f("sess_1.json.2.deleted-backup"),
+                // Not erasable through this call, whatever is asked:
+                f("sess_1.json"),
+                f("sess_1.json.4.deleted"),
+                f("sess_2.json.5.backup"),
+                // Already gone: neither erased nor failed.
+                f("sess_1.json.9.backup"),
+            ),
+        )
+
+        assertEquals(listOf(f("sess_1.json.1.backup"), f("sess_1.json.2.deleted-backup")), result.deleted)
+        assertEquals(listOf(f("sess_1.json"), f("sess_1.json.4.deleted"), f("sess_2.json.5.backup")), result.failed)
+        // A backup that was not requested (made while the confirmation was shown) is kept.
+        assertEquals(
+            listOf("sess_1.json", "sess_1.json.3.backup", "sess_1.json.4.deleted", "sess_2.json.5.backup"),
+            directory.names(),
+        )
+    }
+
+    @Test
+    fun `a deleted backup of another agent still blocks its id`() {
+        val (store, directory) = tickingStore()
+        store.save("sess_1", listOf(UserMessageEntry("claude's")), agent = claude)
+        store.backUpByReplay("sess_1", "m1")
+        val backup = assertNotNull(store.index().of("sess_1")).backups.single()
+        assertNotNull(store.moveBackupToDeleted(backup.file))
+        File(directory, "sess_1.json").delete()
+
+        assertEquals("claude-acp", store.conflictingOwner("sess_1", gemini))
+    }
+
+    @Test
     fun `moving to deleted does nothing without any file`() {
         val (store, directory) = tempStore()
 
