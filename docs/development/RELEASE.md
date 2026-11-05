@@ -81,3 +81,35 @@ git log --oneline v<previous version>..HEAD
 - [ ] The release has `SandboxAgentConnector-<version>.zip` attached and shows the notes of the tag
 
 The version in the examples of `LOCAL_INSTALL.md` is a fixed sample and is not updated on a release.
+
+---
+
+## 4. Raising the supported IDE baseline (`pluginSinceBuild`)
+
+Do this when the oldest supported IDE line turns one year old (see "Compatibility Policy" in `LOCAL_INSTALL.md`).
+`pluginSinceBuild`, `platformVersion`, `javaVersion`, the verification targets and Kotlin `apiVersion` move together, so change them in one commit.
+
+`javaVersion` sets the bytecode target of the plugin as well as the build JDK. The plugin runs on the JBR bundled with the user's IDE, and a class compiled for a newer Java fails there with `UnsupportedClassVersionError`. `javaVersion` must therefore not exceed the Java version of the JBR of the **oldest** supported IDE. A newer LTS is not a reason to raise it.
+
+1. **Choose the new baseline.** Find the release dates of the IDE lines in the Build Number Ranges page of the IntelliJ Platform Plugin SDK, and drop every line older than one year.
+2. **Check the JBR of the new baseline.** Run `./gradlew verifyPlugin` (or `runIde`) once so that the IDE is extracted, then read its JBR:
+   ```bash
+   find ~/.gradle/caches -path '*/jbr/release' -exec grep -H -E 'JAVA_VERSION=|IMPLEMENTOR_VERSION' {} \;
+   ```
+   The same is visible in the IDE under Help | About (Runtime version).
+3. **Decide `javaVersion`.** Keep it, or raise it up to the `JAVA_VERSION` found in step 2, never above.
+4. **Update `gradle.properties`:** `pluginSinceBuild` (e.g. `261`), `platformVersion` (the latest patch of the new baseline) and, if step 3 allows, `javaVersion`.
+5. **Update `build.gradle.kts`:** the lower `create("IU", ...)` of `pluginVerification.ides` to the new `platformVersion`, and check that the upper one is still the latest release.
+6. **Review Kotlin `apiVersion`** in `build.gradle.kts`. The Kotlin stdlib at runtime comes from the IDE; check which Kotlin the new baseline bundles and raise `apiVersion` to it if possible. See the comment there and "Compatibility Policy" in `LOCAL_INSTALL.md`.
+7. **Remove workarounds for the old baseline** that are no longer needed, e.g. the `junit:junit` `testRuntimeOnly` dependency and comments that mention 2025.3.
+8. **Verify:** `./gradlew test`, `./gradlew verifyPlugin` and `./gradlew runIde`. If tests fail with `NoSuchMethodError`, rerun with `--no-build-cache --rerun-tasks`.
+9. **Update the documents:** the baseline in `Specification.md` (Target Platform) and `LOCAL_INSTALL.md` (Compatibility Policy), and mention the raised minimum IDE in the `<change-notes>` of the next release (see section 1).
+10. **Clean up** the extracted IDEs of the dropped lines in the Gradle cache, which are large.
+
+### Checklist
+
+- [ ] `javaVersion` is not above the Java version of the JBR of the new baseline
+- [ ] `pluginSinceBuild`, `platformVersion` and the lower verification target name the same IDE line
+- [ ] Kotlin `apiVersion` matches the Kotlin bundled with the new baseline
+- [ ] `test`, `verifyPlugin` and `runIde` pass
+- [ ] `Specification.md`, `LOCAL_INSTALL.md` and the change notes name the new baseline
