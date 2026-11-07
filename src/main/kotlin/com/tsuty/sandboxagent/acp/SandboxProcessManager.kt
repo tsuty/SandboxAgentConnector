@@ -31,7 +31,7 @@ data class SandboxConfig(
      * through `npx`, which reports its progress on `stderr`, so only a complete lack of output
      * counts as a failure (see [AcpClient.initialize]).
      */
-    val initializeIdleTimeoutSeconds: Int = 180,
+    val initializeIdleTimeoutSeconds: Int = AcpClient.INITIALIZE_IDLE_TIMEOUT_SECONDS.toInt(),
 )
 
 /** Values the attach command is built from that do not come from the settings. */

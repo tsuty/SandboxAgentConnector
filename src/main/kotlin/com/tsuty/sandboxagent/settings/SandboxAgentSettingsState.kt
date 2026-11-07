@@ -6,6 +6,7 @@ import com.intellij.openapi.components.Storage
 import com.intellij.openapi.project.Project
 import com.intellij.util.xmlb.XmlSerializerUtil
 import com.intellij.util.xmlb.annotations.XCollection
+import com.tsuty.sandboxagent.acp.AcpClient
 import com.tsuty.sandboxagent.acp.SandboxConfig
 
 /**
@@ -217,11 +218,8 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
     )
 
     companion object {
-        /**
-         * Generous on purpose: `npx` can stay silent for a while between two progress lines, and
-         * the wait is idle based, so a high value costs nothing when the agent is simply slow.
-         */
-        const val DEFAULT_INITIALIZE_IDLE_TIMEOUT_SECONDS: Int = 180
+        /** See [AcpClient.INITIALIZE_IDLE_TIMEOUT_SECONDS]. */
+        const val DEFAULT_INITIALIZE_IDLE_TIMEOUT_SECONDS: Int = AcpClient.INITIALIZE_IDLE_TIMEOUT_SECONDS.toInt()
         const val MIN_INITIALIZE_IDLE_TIMEOUT_SECONDS: Int = 10
         const val MAX_INITIALIZE_IDLE_TIMEOUT_SECONDS: Int = 1800
 

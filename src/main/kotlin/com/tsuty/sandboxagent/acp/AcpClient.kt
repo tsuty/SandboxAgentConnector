@@ -489,8 +489,13 @@ class AcpClient(
     }
 
     companion object {
-        /** Silence, in seconds, that ends the wait for `initialize` (see [initialize]). */
-        const val INITIALIZE_IDLE_TIMEOUT_SECONDS: Long = 60
+        /**
+         * Default silence, in seconds, that ends the wait for `initialize` (see [initialize]); the
+         * settings start from it. Generous on purpose: `npx` can stay silent for a while between two
+         * progress lines, and the wait is idle based, so a high value costs nothing when the agent
+         * is simply slow.
+         */
+        const val INITIALIZE_IDLE_TIMEOUT_SECONDS: Long = 180
         const val DEFAULT_TIMEOUT_SECONDS: Long = 120
 
         /** Upper bound of the pages [listAllSessions] follows. */
