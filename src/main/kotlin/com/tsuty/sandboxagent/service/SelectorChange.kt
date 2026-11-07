@@ -67,7 +67,7 @@ private fun SessionSelectors.isPending(change: SelectorChange): Boolean = when (
     is SelectorChange.Mode -> modes != null && modes.currentModeId != change.value &&
         modes.availableModes.any { it.id == change.value }
     is SelectorChange.ConfigOption -> configOptions.firstOrNull { it.id == change.configId }?.let { option ->
-        option.currentValue != change.value && option.choices.any { it.value == change.value }
+        option.currentValue != change.value && option.accepts(change.value)
     } ?: false
 }
 

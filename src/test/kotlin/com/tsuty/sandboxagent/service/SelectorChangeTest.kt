@@ -3,6 +3,7 @@ package com.tsuty.sandboxagent.service
 import com.tsuty.sandboxagent.acp.ModelInfo
 import com.tsuty.sandboxagent.acp.SessionConfigChoice
 import com.tsuty.sandboxagent.acp.SessionConfigOption
+import com.tsuty.sandboxagent.acp.SessionConfigOptionType
 import com.tsuty.sandboxagent.acp.SessionMode
 import com.tsuty.sandboxagent.acp.SessionModeState
 import com.tsuty.sandboxagent.acp.SessionModelState
@@ -45,6 +46,19 @@ class SelectorChangeTest {
             configSelectors.nextRememberedChange(remembered, attempted = setOf("config:model", "config:mode")),
         )
         assertNull(configSelectors.nextRememberedChange(remembered, attempted = remembered.keys))
+    }
+
+    @Test
+    fun `a remembered toggle is restored when the session reports it in the other state`() {
+        val fast = SessionConfigOption(id = "fast", type = SessionConfigOptionType.BOOLEAN, currentValue = "false")
+        val selectors = SessionSelectors(models = null, modes = null, configOptions = listOf(fast))
+
+        assertEquals(
+            SelectorChange.ConfigOption("fast", "true"),
+            selectors.nextRememberedChange(mapOf("config:fast" to "true")),
+        )
+        assertNull(selectors.nextRememberedChange(mapOf("config:fast" to "false")))
+        assertNull(selectors.nextRememberedChange(mapOf("config:fast" to "on")))
     }
 
     @Test

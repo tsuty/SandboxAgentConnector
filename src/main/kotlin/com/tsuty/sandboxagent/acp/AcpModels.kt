@@ -8,6 +8,7 @@ import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.descriptors.nullable
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
@@ -125,6 +126,7 @@ object AcpMethods {
     const val SESSION_LIST = "session/list"
     const val SESSION_RESUME = "session/resume"
     const val SESSION_DELETE = "session/delete"
+    const val SESSION_CLOSE = "session/close"
     const val SESSION_PROMPT = "session/prompt"
     const val SESSION_CANCEL = "session/cancel"
     const val SESSION_SET_MODE = "session/set_mode"
@@ -245,8 +247,34 @@ data class FileSystemCapability(
 data class ClientCapabilities(
     val fs: FileSystemCapability = FileSystemCapability(),
     @Serializable(with = FlexibleBooleanSerializer::class) val terminal: Boolean = false,
+    val session: ClientSessionCapabilities? = null,
     /** Omitted while the client cannot show a form: an absent field means "unsupported". */
     val elicitation: ElicitationCapabilities? = null,
+)
+
+/**
+ * ACP `ClientSessionCapabilities`. As with [ElicitationCapabilities], a feature is advertised by
+ * a present `{}` and left unsupported by an absent field, so each one is spelled out.
+ */
+@Serializable
+data class ClientSessionCapabilities(
+    val configOptions: SessionConfigOptionsCapabilities? = null,
+    /** `notice` session updates, shown as a line of the transcript. */
+    val notices: JsonObject? = null,
+) {
+    companion object {
+        /** Everything this plugin supports: boolean config options and notices. */
+        val SUPPORTED = ClientSessionCapabilities(
+            configOptions = SessionConfigOptionsCapabilities(boolean = JsonObject(emptyMap())),
+            notices = JsonObject(emptyMap()),
+        )
+    }
+}
+
+/** ACP `SessionConfigOptionsCapabilities`: the config option types beyond `select`. */
+@Serializable
+data class SessionConfigOptionsCapabilities(
+    val boolean: JsonObject? = null,
 )
 
 @Serializable
@@ -562,6 +590,8 @@ data class UnknownToolCallContent(
 data class ToolCall(
     val toolCallId: String,
     val title: String? = null,
+    /** Programmatic name of the tool (`Bash`, `Edit`, ...); optional, kept by an update without one. */
+    val name: String? = null,
     val kind: String? = null,
     val status: String? = null,
     val content: List<@Serializable(with = ToolCallContentSerializer::class) ToolCallContent> = emptyList(),
@@ -575,6 +605,7 @@ data class ToolCall(
     fun mergeWith(update: ToolCall): ToolCall = ToolCall(
         toolCallId = toolCallId,
         title = update.title ?: title,
+        name = update.name ?: name,
         kind = update.kind ?: kind,
         status = update.status ?: status,
         content = update.content.ifEmpty { content },
@@ -670,6 +701,10 @@ data class SessionConfigChoice(
 /**
  * Generic session configuration selector (`configOptions` of `session/new`). Newer agents report
  * the model and the permission mode this way instead of the dedicated `models` / `modes` state.
+ *
+ * Two types exist: a `select` picks one of [options], a `boolean` is an on/off toggle. The value
+ * of either is kept as a string — `"true"` / `"false"` for a toggle (see [booleanValue]) — so a
+ * selector change is remembered and compared the same way whatever its type.
  */
 @Serializable
 data class SessionConfigOption(
@@ -678,12 +713,21 @@ data class SessionConfigOption(
     val description: String? = null,
     val category: String? = null,
     val type: String? = null,
-    val currentValue: String? = null,
+    @Serializable(with = ConfigValueSerializer::class) val currentValue: String? = null,
     val options: List<SessionConfigChoice> = emptyList(),
 ) {
     val presentableName: String get() = name ?: id
 
     val choices: List<SessionConfigChoice> get() = options.flatMap { it.leaves() }
+
+    val isBoolean: Boolean get() = type == SessionConfigOptionType.BOOLEAN
+
+    /** The state of a `boolean` option; `null` for a `select` or an unreadable value. */
+    val booleanValue: Boolean? get() = if (isBoolean) currentValue?.toBooleanStrictOrNull() else null
+
+    /** `true` when [value] is something this option can be set to. */
+    fun accepts(value: String): Boolean =
+        if (isBoolean) value.toBooleanStrictOrNull() != null else choices.any { it.value == value }
 
     /**
      * `category` is advisory, so the well known ids are accepted as a fallback. Several spellings
@@ -692,6 +736,33 @@ data class SessionConfigOption(
      */
     fun isCategory(vararg expected: String): Boolean =
         category in expected || (category == null && id in expected)
+}
+
+/** `type` of a [SessionConfigOption]. An absent type is read as a `select`. */
+object SessionConfigOptionType {
+    const val SELECT = "select"
+    const val BOOLEAN = "boolean"
+}
+
+/**
+ * `currentValue` is a value id for a `select` and a JSON boolean for a `boolean` option: both
+ * are read as their string form (see [SessionConfigOption]). Written back as a string, which is
+ * only ever done for logs and tests — the wire value of a change is built by
+ * [SessionSetConfigOptionParams.of].
+ */
+object ConfigValueSerializer : KSerializer<String?> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("com.tsuty.sandboxagent.acp.ConfigValue", PrimitiveKind.STRING).nullable
+
+    override fun deserialize(decoder: Decoder): String? {
+        val jsonDecoder = decoder as? JsonDecoder ?: return decoder.decodeString()
+        return (jsonDecoder.decodeJsonElement() as? JsonPrimitive)?.contentOrNull
+    }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    override fun serialize(encoder: Encoder, value: String?) {
+        if (value == null) encoder.encodeNull() else encoder.encodeString(value)
+    }
 }
 
 object SessionConfigCategory {
@@ -782,6 +853,12 @@ data class SessionDeleteParams(
 @Serializable
 class SessionDeleteResult
 
+/** Only sent to an agent declaring `sessionCapabilities.close`; the result is empty. */
+@Serializable
+data class SessionCloseParams(
+    val sessionId: String,
+)
+
 @Serializable
 data class SessionSetModeParams(
     val sessionId: String,
@@ -794,12 +871,29 @@ data class SessionSetModelParams(
     val modelId: String,
 )
 
+/**
+ * A `select` value is sent as its id; a `boolean` one as `type: "boolean"` and a JSON boolean, as
+ * ACP asks (see [of]).
+ */
 @Serializable
 data class SessionSetConfigOptionParams(
     val sessionId: String,
     val configId: String,
-    val value: String,
-)
+    val type: String? = null,
+    val value: JsonElement,
+) {
+    companion object {
+        /** [value] as the option of type [type] takes it; `"true"` / `"false"` for a toggle. */
+        fun of(sessionId: String, configId: String, value: String, type: String? = null): SessionSetConfigOptionParams {
+            val toggle = value.toBooleanStrictOrNull().takeIf { type == SessionConfigOptionType.BOOLEAN }
+            return if (toggle != null) {
+                SessionSetConfigOptionParams(sessionId, configId, SessionConfigOptionType.BOOLEAN, JsonPrimitive(toggle))
+            } else {
+                SessionSetConfigOptionParams(sessionId, configId, value = JsonPrimitive(value))
+            }
+        }
+    }
+}
 
 /**
  * `session/set_mode` answers with the mode state that actually took effect; agents that report
@@ -906,6 +1000,7 @@ data class ThoughtChunkUpdate(
 data class ToolCallUpdateEvent(
     val toolCallId: String,
     val title: String? = null,
+    val name: String? = null,
     val kind: String? = null,
     val status: String? = null,
     val content: List<@Serializable(with = ToolCallContentSerializer::class) ToolCallContent> = emptyList(),
@@ -914,7 +1009,17 @@ data class ToolCallUpdateEvent(
     val rawOutput: JsonElement? = null,
 ) : SessionUpdate {
     val toolCall: ToolCall
-        get() = ToolCall(toolCallId, title, kind, status ?: ToolCallStatus.PENDING, content, locations, rawInput, rawOutput)
+        get() = ToolCall(
+            toolCallId = toolCallId,
+            title = title,
+            name = name,
+            kind = kind,
+            status = status ?: ToolCallStatus.PENDING,
+            content = content,
+            locations = locations,
+            rawInput = rawInput,
+            rawOutput = rawOutput,
+        )
 }
 
 /** `tool_call_update`: progress / output of a running tool call. */
@@ -923,6 +1028,7 @@ data class ToolCallUpdateEvent(
 data class ToolCallProgressUpdate(
     val toolCallId: String,
     val title: String? = null,
+    val name: String? = null,
     val kind: String? = null,
     val status: String? = null,
     val content: List<@Serializable(with = ToolCallContentSerializer::class) ToolCallContent> = emptyList(),
@@ -931,7 +1037,17 @@ data class ToolCallProgressUpdate(
     val rawOutput: JsonElement? = null,
 ) : SessionUpdate {
     val toolCall: ToolCall
-        get() = ToolCall(toolCallId, title, kind, status, content, locations, rawInput, rawOutput)
+        get() = ToolCall(
+            toolCallId = toolCallId,
+            title = title,
+            name = name,
+            kind = kind,
+            status = status,
+            content = content,
+            locations = locations,
+            rawInput = rawInput,
+            rawOutput = rawOutput,
+        )
 }
 
 @Serializable
@@ -1023,6 +1139,26 @@ data class UsageUpdate(
     val cost: UsageCost? = null,
     val raw: JsonElement? = null,
 ) : SessionUpdate
+
+/**
+ * `notice`: information for the user that is not part of the session history. Only sent to a
+ * client advertising `session.notices`; shown as a line of the transcript and never stored.
+ */
+@Serializable
+@SerialName("notice")
+data class NoticeUpdate(
+    /** `info`, `warning`, `error`, or a future / custom severity (read as `info`). */
+    val severity: String? = null,
+    val title: String = "",
+    val description: String? = null,
+) : SessionUpdate
+
+/** `severity` of a [NoticeUpdate]. */
+object NoticeSeverity {
+    const val INFO = "info"
+    const val WARNING = "warning"
+    const val ERROR = "error"
+}
 
 /** Fallback for `sessionUpdate` variants this plugin version does not know yet. */
 @Serializable
@@ -1171,6 +1307,7 @@ object AcpCodec {
             "current_model_update" -> CurrentModelUpdate.serializer()
             "config_option_update" -> ConfigOptionUpdate.serializer()
             "usage_update" -> UsageUpdate.serializer()
+            "notice" -> NoticeUpdate.serializer()
             else -> null
         }
         return decodeOrFallback(serializer, obj) { UnknownSessionUpdate(rawType = type, raw = obj) }
@@ -1265,8 +1402,10 @@ data class PromptAttachment(
 
 /**
  * A file or selection the user attached to the next prompt. Converted into ACP content blocks
- * by [toContentBlock]: the sandbox agent receives the snippet as an embedded resource so it
- * never has to read the file through the (disabled) client file system capability.
+ * by [toContentBlock]: the sandbox agent receives the snippet itself so it never has to read the
+ * file through the (disabled) client file system capability — as an embedded resource when the
+ * agent declares `promptCapabilities.embeddedContext`, and inlined into a text block otherwise,
+ * since ACP lets a client send `resource` blocks only to an agent that declares it.
  */
 @Serializable
 data class AcpContextItem(
@@ -1278,9 +1417,19 @@ data class AcpContextItem(
     val presentableRange: String?
         get() = if (startLine != null && endLine != null) "$startLine-$endLine" else null
 
-    fun toContentBlock(): ContentBlock = EmbeddedResourceContentBlock(
-        EmbeddedResource(uri = uri(), text = content),
-    )
+    fun toContentBlock(embeddedContext: Boolean = true): ContentBlock =
+        if (embeddedContext) {
+            EmbeddedResourceContentBlock(EmbeddedResource(uri = uri(), text = content))
+        } else {
+            TextContentBlock(inlined())
+        }
+
+    /**
+     * The attachment as text, in the `<context ref="file://…">…</context>` markup agents replay an
+     * attachment in: a replayed prompt is then read back into the same chip (see
+     * [promptAttachments]) and stripped from the typed text (see [promptTextWithoutAttachments]).
+     */
+    private fun inlined(): String = "<context ref=\"${uri()}\">\n$content\n</context>"
 
     /**
      * The chip of this attachment: the reference alone for a file, the snippet as well for a

@@ -40,8 +40,8 @@ Legend used below:
 | `elicitation.form` | `{}` while JCEF is available | Without JCEF the field is omitted. |
 | `elicitation.url` | Omitted | URL mode would need the target shown and consented to before navigating. |
 | `auth.terminal` | Omitted | Authentication is set up in the sandbox beforehand. |
-| `session.configOptions.boolean` | Omitted | Boolean config options are not drawn yet (§5). |
-| `session.notices` | Omitted | `notice` updates are not shown yet (§4). |
+| `session.configOptions.boolean` | `{}` | Drawn as a toggle (§5), with or without JCEF. |
+| `session.notices` | `{}` | Shown as a line of the transcript (§4), with or without JCEF. |
 | `session.compaction` | Omitted | Compaction updates are not shown yet (§4). |
 
 An omitted capability means "unsupported" to the agent, which then must not use the feature.
@@ -62,11 +62,11 @@ An omitted capability means "unsupported" to the agent, which then must not use 
 | `session/resume` | Yes | When `sessionCapabilities.resume` is declared. |
 | `session/list` | Yes | When `sessionCapabilities.list` is declared; pages are followed. |
 | `session/delete` | Yes | When `sessionCapabilities.delete` is declared. |
-| `session/close` | No | Closing a tab ends the agent process instead. The capability is decoded, never used. |
+| `session/close` | Yes | When `sessionCapabilities.close` is declared: for the session left by `New session`, by entering another session, and by closing the tab or the connection. Best effort, waits at most 3 s. |
 | `session/prompt` | Partial | See §5 for the content sent. No timeout. |
 | `session/cancel` | Yes | Pending permission requests and forms are answered as cancelled. |
 | `session/set_mode` | Yes | |
-| `session/set_config_option` | Partial | `select` options only (§5). |
+| `session/set_config_option` | Yes | `select` and `boolean` options (§5). |
 | `session/set_model` | Yes (legacy) | Not in the v1.15 schema; kept for agents that still report `models` instead of a `model` config option. |
 | `$/cancel_request` | No (sending) | The plugin never withdraws a request it sent. |
 
@@ -90,7 +90,7 @@ An omitted capability means "unsupported" to the agent, which then must not use 
 | `user_message_chunk` | Yes | Replayed history. |
 | `agent_message_chunk` | Yes | `messageId` is used to compare replayed history with the local transcript. |
 | `agent_thought_chunk` | Yes | |
-| `tool_call` / `tool_call_update` | Yes | `title`, `kind`, `status`, `content`, `locations`, `rawInput`, `rawOutput`. The `name` field (stable since v1.8) is ignored. |
+| `tool_call` / `tool_call_update` | Yes | `title`, `name`, `kind`, `status`, `content`, `locations`, `rawInput`, `rawOutput`. `name` is the title of a card without `title`. |
 | `plan` | Yes | |
 | `available_commands_update` | Yes | Slash command popup. |
 | `current_mode_update` | Yes | |
@@ -98,7 +98,7 @@ An omitted capability means "unsupported" to the agent, which then must not use 
 | `config_option_update` | Yes | |
 | `session_info_update` | Yes | Title / update time. |
 | `usage_update` | Yes | Context usage and cost. |
-| `notice` | No | Not advertised; ignored if received. |
+| `notice` | Yes | One line of plain text, colored by `severity`; live only, never stored in the snapshot. |
 | `compaction_update` / `compaction_summary_chunk` | No | Not advertised; ignored if received. |
 
 Any variant the plugin does not know is ignored and logged, never a decoding failure.
@@ -110,7 +110,7 @@ Any variant the plugin does not know is ignored and logged, never a decoding fai
 | Item | Status | Notes |
 |---|---|---|
 | Prompt: `text` | Yes | |
-| Prompt: `resource` (embedded) | Yes | Attached files and selections. **Sent without checking `promptCapabilities.embeddedContext`** (§8). |
+| Prompt: `resource` (embedded) | Yes | Attached files and selections, when the agent declares `promptCapabilities.embeddedContext`. Otherwise they are inlined into a `text` block as `<context ref="file://…">…</context>`. |
 | Prompt: `resource_link` | No | |
 | Prompt: `image` / `audio` | No | |
 | Shown: `text` | Yes | Markdown, sanitized. |
@@ -119,7 +119,7 @@ Any variant the plugin does not know is ignored and logged, never a decoding fai
 | Tool call content: `content` / `diff` | Yes | Diffs open in the IDE diff viewer. |
 | Tool call content: `terminal` | By design | Only meaningful with the `terminal` client capability. |
 | Config option type `select` | Yes | Grouped options are flattened. `mode`, `model`, `thought_level` categories are recognized. |
-| Config option type `boolean` | No | Not advertised (§2). |
+| Config option type `boolean` | Yes | A toggle in the prompt action bar; set with `type: "boolean"` and a JSON boolean. |
 | Stop reasons | Yes | `end_turn`, `max_tokens`, `max_turn_requests`, `refusal`, `cancelled`. |
 
 ---
@@ -134,7 +134,7 @@ that only clarified wording are left out.
 | v0.10.8 | Session config options | Yes (`select`) |
 | v0.11.1 | `session/list`, `session_info_update` | Yes |
 | v0.12.2 | `session/resume` | Yes |
-| v0.12.2 | `session/close` | No |
+| v0.12.2 | `session/close` | Yes |
 | v0.13.3 | `logout` | No |
 | v0.13.5 | `additionalDirectories` for sessions | No |
 | v0.13.6 | Optional message IDs (`messageId`) | Yes |
@@ -142,11 +142,11 @@ that only clarified wording are left out.
 | v0.13.6 | `session/delete` | Yes |
 | v1.1.0 | `model` config option category | Yes |
 | v1.2.0 | Request cancellation (`$/cancel_request`) | Yes (receiving) |
-| v1.3.0 | Boolean session config options | No |
+| v1.3.0 | Boolean session config options | Yes |
 | v1.7.0 | Elicitation | Partial (form mode) |
 | v1.7.0 | Terminal authentication | By design |
-| v1.8.0 | Tool call `name` | No (ignored) |
-| v1.11.0 | Session notices | No |
+| v1.8.0 | Tool call `name` | Yes |
+| v1.11.0 | Session notices | Yes |
 | v1.11.0 | Session compaction | No |
 
 ---
@@ -162,10 +162,7 @@ Nothing of `schema.unstable.json` is implemented. As of v1.15.1 that includes, a
 
 ## 8. Known deviations
 
-* **`resource` blocks without `embeddedContext`.** The plugin sends attachments as embedded
-  `resource` blocks whatever the agent declared, while ACP lets a client send them only to an agent
-  that declares `promptCapabilities.embeddedContext`. Agents that do not declare it may refuse or
-  ignore the attachments.
+None known.
 
 ---
 

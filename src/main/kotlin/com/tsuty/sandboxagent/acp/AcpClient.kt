@@ -367,6 +367,19 @@ class AcpClient(
     }
 
     /**
+     * Tells the agent a session is left, so it can cancel what still runs and free what it holds.
+     * Like [deleteSession], an agent answering with no `result` at all still succeeded.
+     */
+    suspend fun closeSession(sessionId: String, timeoutMillis: Long) {
+        val response = request(
+            AcpMethods.SESSION_CLOSE,
+            json.encodeToJsonElement(SessionCloseParams.serializer(), SessionCloseParams(sessionId)),
+            timeoutMillis = timeoutMillis,
+        )
+        response.error?.let { throw AcpSandboxException(it) }
+    }
+
+    /**
      * Runs a prompt turn. The turn is finished exactly when this response arrives, so no
      * timeout is applied: a turn may legitimately run for a long time, and a dying sandbox
      * fails the request through [failPending].
@@ -399,14 +412,23 @@ class AcpClient(
         SessionSetModelResult(),
     )
 
-    /** Generic selector of newer agents, used for the model when `session/set_model` is absent. */
-    suspend fun setConfigOption(sessionId: String, configId: String, value: String): SessionSetConfigOptionResult =
+    /**
+     * Generic selector of newer agents, used for the model when `session/set_model` is absent.
+     * [type] is the `type` of the option, which decides how [value] goes on the wire (see
+     * [SessionSetConfigOptionParams.of]).
+     */
+    suspend fun setConfigOption(
+        sessionId: String,
+        configId: String,
+        value: String,
+        type: String? = null,
+    ): SessionSetConfigOptionResult =
         reportedState(
             AcpMethods.SESSION_SET_CONFIG_OPTION,
             SessionSetConfigOptionResult.serializer(),
             json.encodeToJsonElement(
                 SessionSetConfigOptionParams.serializer(),
-                SessionSetConfigOptionParams(sessionId, configId, value),
+                SessionSetConfigOptionParams.of(sessionId, configId, value, type),
             ),
             SessionSetConfigOptionResult(),
         )

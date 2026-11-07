@@ -1,6 +1,8 @@
 package com.tsuty.sandboxagent.service
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.Application
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
@@ -17,6 +19,7 @@ import com.tsuty.sandboxagent.acp.AgentOutputTail
 import com.tsuty.sandboxagent.acp.AvailableCommand
 import com.tsuty.sandboxagent.acp.AvailableCommandsUpdate
 import com.tsuty.sandboxagent.acp.ClientCapabilities
+import com.tsuty.sandboxagent.acp.ClientSessionCapabilities
 import com.tsuty.sandboxagent.acp.ConfigOptionUpdate
 import com.tsuty.sandboxagent.acp.ContentBlock
 import com.tsuty.sandboxagent.acp.CurrentModeUpdate
@@ -30,6 +33,7 @@ import com.tsuty.sandboxagent.acp.JsonRpcError
 import com.tsuty.sandboxagent.acp.JsonRpcId
 import com.tsuty.sandboxagent.acp.JsonRpcNotification
 import com.tsuty.sandboxagent.acp.JsonRpcRequest
+import com.tsuty.sandboxagent.acp.NoticeUpdate
 import com.tsuty.sandboxagent.acp.PermissionOption
 import com.tsuty.sandboxagent.acp.PermissionOutcome
 import com.tsuty.sandboxagent.acp.PlanEntry
@@ -288,6 +292,9 @@ sealed interface SandboxAgentEvent {
     data class ElicitationRequested(
         val request: ElicitationRequest,
     ) : SandboxAgentEvent
+
+    /** A `notice` session update: [severity] is `info`, `warning`, `error` or anything else. */
+    data class NoticeReceived(val severity: String?, val title: String, val description: String?) : SandboxAgentEvent
 
     data class Error(val message: String, val throwable: Throwable? = null) : SandboxAgentEvent
 }
@@ -620,6 +627,9 @@ class SandboxAgentService(
     val canDeleteSessions: Boolean
         get() = agentCapabilities.sessionCapabilities?.delete == true
 
+    val canCloseSessions: Boolean
+        get() = agentCapabilities.sessionCapabilities?.close == true
+
     fun addListener(listener: SandboxAgentEventListener) {
         listeners += listener
     }
@@ -718,6 +728,9 @@ class SandboxAgentService(
                     agentOutput.flush()
                     agentExitCode.set(exitCode)
                     acpClient.failPending(IllegalStateException("Sandbox process terminated with exit code $exitCode"))
+                    // A process stopped after its tab moved on (see [shutDownAgent]) must not
+                    // touch the connection that replaced it.
+                    if (client.let { it != null && it !== acpClient }) return
                     cancelPendingRequests()
                     setState(SessionState.DISCONNECTED, "Sandbox process terminated (exit code $exitCode)")
                 }
@@ -969,14 +982,27 @@ class SandboxAgentService(
      * Deletes a pristine session that is about to be left behind (another session is entered, or
      * the connection goes away). Best effort: agents without `session/delete` simply keep it.
      */
-    private suspend fun discardPristineSession(keep: String? = null) {
-        val pristine = pristineSessionRef.get() ?: return
-        if (pristine == keep) return
+    private suspend fun discardPristineSession(keep: String? = null): String? {
+        val pristine = pristineSessionRef.get() ?: return null
+        if (pristine == keep) return null
         pristineSessionRef.set(null)
-        val acpClient = client ?: return
-        if (!canDeleteSessions) return
-        runCatching { acpClient.deleteSession(SessionDeleteParams(pristine)) }
+        val acpClient = client ?: return null
+        if (!canDeleteSessions) return null
+        return runCatching { acpClient.deleteSession(SessionDeleteParams(pristine)) }
             .onFailure { log.info("session/delete of the unused session $pristine failed", it) }
+            .map { pristine }
+            .getOrNull()
+    }
+
+    /**
+     * Tells the agent that [sessionId] is left (`session/close`), so it stops what still runs in
+     * it and frees what it holds. Best effort and bounded: agents without the capability, or
+     * failing to answer in time, simply keep the session as they did before.
+     */
+    private suspend fun closeAgentSession(acpClient: AcpClient, sessionId: String) {
+        if (!canCloseSessions) return
+        runCatching { acpClient.closeSession(sessionId, SESSION_CLOSE_TIMEOUT_MILLIS) }
+            .onFailure { log.info("session/close of $sessionId failed", it) }
     }
 
     /** Starts a fresh session in the background, which is what the new session button does. */
@@ -998,12 +1024,13 @@ class SandboxAgentService(
             selectorsRef.get()?.let { publish(it.toEvent()) }
             return
         }
-        sessionIdRef.getAndSet(null)?.let { releaseLock(it) }
+        val left = sessionIdRef.getAndSet(null)?.also { releaseLock(it) }
         commandsRef.set(emptyList())
         selectorsRef.set(null)
         publish(SandboxAgentEvent.SessionCleared)
         val acpClient = client ?: return
         if (state != SessionState.READY) return
+        left?.let { closeAgentSession(acpClient, it) }
         createSessionReporting(acpClient)
     }
 
@@ -1100,6 +1127,7 @@ class SandboxAgentService(
             )
             return
         }
+        val left = sessionIdRef.get()?.takeIf { it != sessionId }
         val snapshot = runCatching { snapshotStore.load(sessionId) }.getOrNull()
         if (!canRestoreSessions && snapshot == null) {
             publish(
@@ -1114,7 +1142,8 @@ class SandboxAgentService(
         publish(SandboxAgentEvent.SessionListLoading(true))
         try {
             // The session that is left behind was never used: it must not pile up on the agent.
-            discardPristineSession(keep = sessionId)
+            val deleted = discardPristineSession(keep = sessionId)
+            left?.takeIf { it != deleted }?.let { closeAgentSession(acpClient, it) }
             val title = titleOf(entry, snapshot)
             if (!canRestoreSessions) {
                 // Visual restore only: the agent keeps no context for this session.
@@ -1414,12 +1443,17 @@ class SandboxAgentService(
         saveSnapshot(sessionId)
     }
 
-    /** Text first, then every attached file / selection as an embedded resource block. */
-    private fun promptBlocks(prompt: String, context: List<AcpContextItem>): List<ContentBlock> =
-        buildList {
+    /**
+     * Text first, then every attached file / selection: as an embedded resource block when the
+     * agent declares `embeddedContext`, inlined into a text block otherwise (see [AcpContextItem]).
+     */
+    private fun promptBlocks(prompt: String, context: List<AcpContextItem>): List<ContentBlock> {
+        val embeddedContext = agentCapabilities.promptCapabilities?.embeddedContext == true
+        return buildList {
             add(TextContentBlock(prompt))
-            context.forEach { add(it.toContentBlock()) }
+            context.forEach { add(it.toContentBlock(embeddedContext)) }
         }
+    }
 
     /**
      * Interrupts the running turn with a `session/cancel` notification. The agent still answers
@@ -1545,7 +1579,8 @@ class SandboxAgentService(
         is SelectorChange.ConfigOption -> {
             // The agent may reject or coerce the value (`auto` → `acceptEdits`), so the answered
             // state — not `value` — is what the selectors are refreshed from.
-            val reported = acpClient.setConfigOption(sessionId, change.configId, change.value).configOptions
+            val type = selectorsRef.get()?.configOptions?.firstOrNull { it.id == change.configId }?.type
+            val reported = acpClient.setConfigOption(sessionId, change.configId, change.value, type).configOptions
             val answered = reported.firstOrNull { it.id == change.configId }
             if (answered == null) {
                 // Nothing says whether the change took effect: the selector keeps showing `value`.
@@ -1609,17 +1644,22 @@ class SandboxAgentService(
     /** Tears the session down in the background; returns immediately. */
     fun disconnect(): Job = scope.launch {
         // An unused session would otherwise survive the connection it was created for.
-        discardPristineSession()
-        closeSession()
+        val deleted = discardPristineSession()
+        closeSession(closeOnAgent = deleted == null)
     }
 
-    private fun closeSession() {
+    /** [closeOnAgent] `= false` skips the `session/close` of a session that was just deleted. */
+    private fun closeSession(closeOnAgent: Boolean = true) {
         // Detach only tears down the ACP agent process; the sandbox itself is left running
         // so it can keep serving other clients (IDE-independent work, other attach sessions, ...).
         cancelPendingRequests()
         client?.failPending(IllegalStateException("Session closed"))
-        processManager?.stopAgent()
-        trafficLogger?.close()
+        shutDownAgent(
+            client,
+            processManager,
+            trafficLogger,
+            sessionId = sessionIdRef.get()?.takeIf { closeOnAgent && canCloseSessions },
+        )
         client = null
         processManager = null
         trafficLogger = null
@@ -1643,6 +1683,42 @@ class SandboxAgentService(
         if (state != SessionState.ERROR) {
             setState(SessionState.DISCONNECTED)
         }
+    }
+
+    /**
+     * Stops the agent process. With a [sessionId] to close, `session/close` is sent first and
+     * waited for (at most [SESSION_CLOSE_TIMEOUT_MILLIS]) off the service's own scope, which a
+     * closed tab has already cancelled; the traffic log is closed last, so it records the answer.
+     * While the IDE exits nothing is waited for: the process must not outlive it.
+     */
+    private fun shutDownAgent(
+        acpClient: AcpClient?,
+        manager: SandboxProcessManager?,
+        logger: AcpTrafficLogger?,
+        sessionId: String?,
+    ) {
+        val stop = {
+            manager?.stopAgent()
+            logger?.close()
+        }
+        if (acpClient == null || sessionId == null || isExiting()) {
+            stop()
+            return
+        }
+        TEARDOWN_SCOPE.launch {
+            try {
+                acpClient.closeSession(sessionId, SESSION_CLOSE_TIMEOUT_MILLIS)
+            } catch (e: Exception) {
+                log.info("session/close of $sessionId failed", e)
+            } finally {
+                stop()
+            }
+        }
+    }
+
+    private fun isExiting(): Boolean {
+        val application: Application = ApplicationManager.getApplication() ?: return false
+        return application.isExitInProgress || application.isDisposed
     }
 
     override fun dispose() {
@@ -1697,6 +1773,12 @@ class SandboxAgentService(
             return
         }
         val updatedSession = notification.sessionId ?: sessionIdRef.get()
+        // A notice is live information, never history: it is shown even while a replay is
+        // suppressed, and it is not recorded (see [SessionTranscriptRecorder]).
+        (notification.update as? NoticeUpdate)?.let { notice ->
+            publish(SandboxAgentEvent.NoticeReceived(notice.severity, notice.title, notice.description))
+            return
+        }
         val capture = updatedSession?.let { suppressedReplays[it] }
         if (capture != null) {
             // A background `session/load` is replaying a transcript the UI already shows: it is
@@ -1905,6 +1987,8 @@ class SandboxAgentService(
      */
     private fun clientInitializeParams(): InitializeParams = InitializeParams(
         clientCapabilities = ClientCapabilities(
+            // Both are drawn without JCEF too: a toggle is Swing, a notice a line of plain text.
+            session = ClientSessionCapabilities.SUPPORTED,
             elicitation = ElicitationCapabilities.FORM_ONLY.takeIf { JBCefApp.isSupported() },
         ),
     )
@@ -1955,6 +2039,16 @@ class SandboxAgentService(
 
         /** Heartbeat interval of a held lock; well under [LOCK_TTL_MILLIS] so it never lapses. */
         private const val LOCK_HEARTBEAT_MILLIS = 20_000L
+
+        /**
+         * How long `session/close` is waited for. Short: the agent only has to stop and free the
+         * session, and on a closed tab its process is stopped once the wait is over anyway.
+         */
+        private const val SESSION_CLOSE_TIMEOUT_MILLIS = 3_000L
+
+        /** Runs the `session/close` of a closed tab, whose own scope is already cancelled. */
+        private val TEARDOWN_SCOPE =
+            CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("SandboxAgentTeardown"))
     }
 }
 

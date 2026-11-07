@@ -41,6 +41,15 @@ class ToolCallPresentationTest {
     )
 
     @Test
+    fun `the tool name stands in for a missing title, before the kind`() {
+        val call = ToolCall(toolCallId = "t1", name = "WebSearch", kind = ToolKind.FETCH)
+
+        assertEquals("WebSearch", ToolCallPresentation.title(call))
+        assertEquals("Fetch", ToolCallPresentation.title(call.copy(name = null)))
+        assertEquals("Search the web", ToolCallPresentation.title(call.copy(title = "Search the web")))
+    }
+
+    @Test
     fun `the anchor of a file edit reports the changed lines`() {
         assertEquals("+1 / -1", ToolCallPresentation.summary(edit))
         assertEquals("Edit tmp/sample.json: +1 / -1", ToolCallPresentation.anchor(edit))

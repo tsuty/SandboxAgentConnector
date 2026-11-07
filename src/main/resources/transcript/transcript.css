@@ -111,6 +111,9 @@ pre.stream {
 .notice--error,
 .notice--error .notice-icon { color: var(--ra-error, #c75450); }
 
+.notice--warning,
+.notice--warning .notice-icon { color: var(--ra-warning, #c29a00); }
+
 .notice-icon { flex: 0 0 auto; align-self: center; }
 
 .notice-body { min-width: 0; overflow-wrap: anywhere; }

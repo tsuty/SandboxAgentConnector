@@ -1,5 +1,6 @@
 package com.tsuty.sandboxagent.acp
 
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -364,7 +365,7 @@ class AcpModelsTest {
         val encoded = AcpJson
             .encodeToJsonElement(
                 SessionSetConfigOptionParams.serializer(),
-                SessionSetConfigOptionParams(sessionId = "sess_1", configId = "model", value = "sonnet"),
+                SessionSetConfigOptionParams.of(sessionId = "sess_1", configId = "model", value = "sonnet"),
             )
             .jsonObject
         assertEquals(setOf("sessionId", "configId", "value"), encoded.keys)
@@ -760,5 +761,68 @@ class AcpModelsTest {
         )
 
         assertEquals("[]", block.promptAttachments.single().content)
+    }
+
+    @Test
+    fun `the session capabilities advertise boolean config options and notices`() {
+        val encoded = AcpJson.encodeToJsonElement(
+            ClientCapabilities.serializer(),
+            ClientCapabilities(session = ClientSessionCapabilities.SUPPORTED),
+        ).jsonObject
+
+        val session = encoded["session"]!!.jsonObject
+        assertEquals(JsonObject(emptyMap()), session["configOptions"]!!.jsonObject["boolean"])
+        assertEquals(JsonObject(emptyMap()), session["notices"])
+        // Compaction is not supported, so it is left out rather than sent as `null`.
+        assertFalse("compaction" in session)
+    }
+
+    @Test
+    fun `without embedded context an attachment is inlined as context markup`() {
+        val item = AcpContextItem(path = "/workspace/a b.kt", content = "class A", startLine = 3, endLine = 4)
+
+        val block = assertIs<TextContentBlock>(item.toContentBlock(embeddedContext = false))
+
+        assertEquals("<context ref=\"file:///workspace/a%20b.kt#L3-4\">\nclass A\n</context>", block.text)
+        // Replayed, the block is read back into the same chip and leaves no typed text behind.
+        assertEquals(item.toAttachment(), block.promptAttachments.single())
+        assertNull(block.userPromptText)
+        assertIs<EmbeddedResourceContentBlock>(item.toContentBlock(embeddedContext = true))
+    }
+
+    @Test
+    fun `a notice update is decoded with its severity, title and description`() {
+        val update = AcpCodec.decodeSessionUpdate(
+            AcpJson.parseToJsonElement(
+                """{"sessionUpdate":"notice","severity":"warning","title":"Rate limited","description":"Retrying in 30s"}""",
+            ),
+        )
+
+        assertEquals(NoticeUpdate(NoticeSeverity.WARNING, "Rate limited", "Retrying in 30s"), update)
+    }
+
+    @Test
+    fun `a boolean config option reads its JSON boolean as a value`() {
+        val option = AcpJson.decodeFromString(
+            SessionConfigOption.serializer(),
+            """{"id":"fast","name":"Fast","type":"boolean","currentValue":false}""",
+        )
+
+        assertTrue(option.isBoolean)
+        assertEquals("false", option.currentValue)
+        assertEquals(false, option.booleanValue)
+        assertTrue(option.accepts("true"))
+        assertFalse(option.accepts("fast"))
+        assertNull(AcpJson.decodeFromString(SessionConfigOption.serializer(), """{"id":"mode","currentValue":null}""").currentValue)
+    }
+
+    @Test
+    fun `a tool call update keeps the tool name it does not repeat`() {
+        val started = ToolCall(toolCallId = "t1", title = "ls", name = "Bash")
+        val update = AcpCodec.decodeSessionUpdate(
+            AcpJson.parseToJsonElement("""{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed"}"""),
+        )
+
+        assertEquals("Bash", started.mergeWith(assertIs<ToolCallProgressUpdate>(update).toolCall).name)
     }
 }

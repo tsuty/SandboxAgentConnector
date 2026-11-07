@@ -122,6 +122,8 @@ class AcpClientTest {
         val request = awaitRequest(sent)
         assertEquals(AcpMethods.SESSION_SET_CONFIG_OPTION, request.method)
         assertEquals("auto", request.params!!.jsonObject["value"]!!.jsonPrimitive.content)
+        // A value id goes without a `type`, which is how the spec reads an untyped value.
+        assertNull(request.params.jsonObject["type"])
 
         client.handleStdoutChunk(
             """{"jsonrpc":"2.0","id":${request.id.content},"result":{"configOptions":[""" +
@@ -404,6 +406,40 @@ class AcpClientTest {
         client.handleStdoutChunk("""{"jsonrpc":"2.0","id":${request.id.content},"result":null}""" + "\n")
 
         assertTrue(withTimeout(2_000) { deferred.await() }.isSuccess)
+    }
+
+    @Test
+    fun `session close names the session and succeeds on an empty result`() = runBlocking {
+        val sent = mutableListOf<String>()
+        val client = AcpClient(writeLine = { sent += it })
+
+        val deferred = async { runCatching { client.closeSession("sess_1", timeoutMillis = 2_000) } }
+        val request = awaitRequest(sent)
+        assertEquals(AcpMethods.SESSION_CLOSE, request.method)
+        assertEquals("sess_1", request.params!!.jsonObject["sessionId"]!!.jsonPrimitive.content)
+
+        client.handleStdoutChunk("""{"jsonrpc":"2.0","id":${request.id.content},"result":{}}""" + "\n")
+
+        assertTrue(withTimeout(2_000) { deferred.await() }.isSuccess)
+    }
+
+    @Test
+    fun `a boolean config option is set with its type and a JSON boolean`() = runBlocking {
+        val sent = mutableListOf<String>()
+        val client = AcpClient(writeLine = { sent += it })
+
+        val deferred = async { client.setConfigOption("sess_1", "fast", "true", SessionConfigOptionType.BOOLEAN) }
+        val request = awaitRequest(sent)
+        val params = request.params!!.jsonObject
+        assertEquals("boolean", params["type"]!!.jsonPrimitive.content)
+        assertEquals(JsonPrimitive(true), params["value"])
+
+        client.handleStdoutChunk(
+            """{"jsonrpc":"2.0","id":${request.id.content},"result":{"configOptions":[""" +
+                """{"id":"fast","name":"Fast","type":"boolean","currentValue":true}]}}""" + "\n",
+        )
+
+        assertEquals(true, withTimeout(2_000) { deferred.await() }.configOptions.single().booleanValue)
     }
 
     @Test

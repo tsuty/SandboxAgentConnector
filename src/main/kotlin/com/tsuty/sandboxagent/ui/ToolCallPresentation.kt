@@ -34,8 +34,11 @@ import kotlinx.serialization.json.contentOrNull
  */
 object ToolCallPresentation {
 
+    /** The agent's title, else the programmatic tool name (`Bash`), else what the kind stands for. */
     fun title(toolCall: ToolCall): String =
-        toolCall.title?.takeIf { it.isNotBlank() } ?: kindLabel(toolCall.kind)
+        toolCall.title?.takeIf { it.isNotBlank() }
+            ?: toolCall.name?.takeIf { it.isNotBlank() }
+            ?: kindLabel(toolCall.kind)
 
     fun kindLabel(kind: String?): String = when (kind) {
         ToolKind.READ -> "Read file"

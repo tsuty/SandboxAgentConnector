@@ -6,6 +6,8 @@ import com.intellij.openapi.ui.popup.ListPopupStepEx
 import com.intellij.openapi.ui.popup.PopupStep
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep
 import com.intellij.openapi.util.IconLoader
+import com.intellij.openapi.util.text.StringUtil
+import com.intellij.util.ui.EmptyIcon
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.StatusText
 import com.intellij.util.ui.UIUtil
@@ -289,3 +291,52 @@ internal class FlatSelectorPopupStep<T : Any>(
  * description the agent reports, shown as the tooltip of the row in the dropdown.
  */
 data class SelectorItem(val id: String, val label: String, val description: String? = null)
+
+/**
+ * Borderless on/off toggle, for a `boolean` session config option: the name of the option, with a
+ * check mark while it is on. A click flips it and reports the new state through [onToggle]; the
+ * state shown is only ever the one set by [setState], so a value the agent refuses snaps back.
+ */
+class FlatToggle(
+    private val name: String,
+    private val onToggle: (Boolean) -> Unit,
+) : FlatControl({}) {
+
+    private val mark = JLabel()
+    private val label = JLabel(name, SwingConstants.LEFT).apply { font = JBUI.Fonts.smallFont() }
+
+    var isOn: Boolean = false
+        private set
+
+    init {
+        border = JBUI.Borders.empty(3, 4)
+        add(mark)
+        add(label)
+        addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent) {
+                if (isEnabled) onToggle(!isOn)
+            }
+        })
+        setState(on = false, description = null)
+    }
+
+    override fun contentComponents(): List<JLabel> = listOf(mark, label)
+
+    /**
+     * Shows [on] without reporting it, which is how the state the agent reported is drawn; also
+     * shows the toggle again after a disconnection hid it.
+     */
+    fun setState(on: Boolean, description: String?) {
+        isOn = on
+        isVisible = true
+        // The off state keeps the room of the mark, so flipping the toggle does not move the bar.
+        mark.icon = if (on) AllIcons.Actions.Checked else EmptyIcon.ICON_16
+        label.foreground = if (on) UIUtil.getLabelForeground() else UIUtil.getContextHelpForeground()
+        val state = if (on) "On" else "Off"
+        toolTipText = listOfNotNull("$name: $state", description?.takeIf { it.isNotBlank() }).joinToString("<br>", "<html>", "</html>") {
+            StringUtil.escapeXmlEntities(it)
+        }
+        revalidate()
+        repaint()
+    }
+}

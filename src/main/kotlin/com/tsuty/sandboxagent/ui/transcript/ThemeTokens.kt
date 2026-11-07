@@ -48,6 +48,7 @@ object ThemeTokens {
             put("--ra-border", css(JBColor.border()))
             put("--ra-code-bg", css(SandboxAgentColors.CODE_BACKGROUND))
             put("--ra-error", css(JBColor.RED))
+            put("--ra-warning", css(WARNING))
             put("--ra-accent", css(accent()))
             put("--ra-hover-bg", css(hoverBackground()))
             put("--ra-selection-bg", css(selectionBackground()))
@@ -127,6 +128,11 @@ object ThemeTokens {
 
     private val REMOVED_BACKGROUND: Color = JBColor.lazy {
         if (JBColor.isBright()) Color(0xFF, 0xEB, 0xE9) else Color(0x3D, 0x22, 0x22)
+    }
+
+    /** Text of a `warning` notice: amber, readable on both the light and the dark panel. */
+    private val WARNING: Color = JBColor.lazy {
+        if (JBColor.isBright()) Color(0x9A, 0x6A, 0x00) else Color(0xD9, 0xA3, 0x43)
     }
 
     /** Generic UI families, in the order Chromium should try them. */

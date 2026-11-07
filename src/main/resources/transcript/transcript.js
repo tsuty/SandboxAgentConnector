@@ -236,6 +236,7 @@
         plan: {title: 'Plan', icon: 'plan', framed: true, quiet: true},
         thought: {fold: 'Thinking', quiet: true},
         system: {notice: true},
+        warning: {notice: true, warning: true},
         completion: {notice: true},
         error: {notice: true, error: true}
     };
@@ -253,8 +254,8 @@
     }
 
     function noticeBlock(event, role) {
-        var node = el('div', 'entry notice' + (role.error ? ' notice--error' : ''));
-        if (role.error) {
+        var node = el('div', 'entry notice' + (role.error ? ' notice--error' : '') + (role.warning ? ' notice--warning' : ''));
+        if (role.error || role.warning) {
             var mark = icon('error');
             mark.classList.add('notice-icon');
             node.appendChild(mark);

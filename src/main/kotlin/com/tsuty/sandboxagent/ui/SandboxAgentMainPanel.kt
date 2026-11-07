@@ -173,6 +173,9 @@ class SandboxAgentMainPanel(
      */
     private val extraSelectors = linkedMapOf<String, FlatSelector<SelectorItem>>()
 
+    /** The toggle of every reported `boolean` option, by `configId` (see [populateExtraConfigOptions]). */
+    private val extraToggles = linkedMapOf<String, FlatToggle>()
+
     private val sendStopButton = FlatIconButton(SandboxAgentIcons.Send, "Send prompt") { onSendStop() }
     // Display only: kept enabled so Swing keeps delivering mouse events and shows the tooltip
     // (disabled components never get one), the click itself does nothing.
@@ -447,6 +450,7 @@ class SandboxAgentMainPanel(
                 chatLog.showElicitation(event.request) { result -> service.respondToElicitation(event.request, result) }
             }
             is SandboxAgentEvent.UsageUpdated -> updateTokenUsageButton(event)
+            is SandboxAgentEvent.NoticeReceived -> chatLog.appendNotice(event.severity, event.title, event.description)
             is SandboxAgentEvent.Error -> chatLog.appendError(event.message)
             // The list itself is read from the service when the dropdown is opened.
             is SandboxAgentEvent.SessionsListed -> Unit
@@ -554,18 +558,20 @@ class SandboxAgentMainPanel(
      * the Claude ACP agent) report the model, the permission mode and the reasoning budget.
      */
     private fun populateConfigOptions(configOptions: List<SessionConfigOption>) {
-        configOptions.firstOrNull { it.isCategory(SessionConfigCategory.MODEL) }?.let { option ->
+        // The fixed slots are drop downs: a toggle that happens to share a category gets its own.
+        val selects = configOptions.filterNot { it.isBoolean }
+        selects.firstOrNull { it.isCategory(SessionConfigCategory.MODEL) }?.let { option ->
             modelConfigId = option.id
             fill(modelSelector, option)
         }
-        configOptions.firstOrNull { it.isCategory(SessionConfigCategory.MODE) }?.let { option ->
+        selects.firstOrNull { it.isCategory(SessionConfigCategory.MODE) }?.let { option ->
             modeConfigId = option.id
             fill(modeSelector, option)
         }
         // Unlike the two above, the effort selector has no dedicated state to fall back on, so an
         // option that is not reported (any more) empties it instead of keeping stale choices —
         // which is also how it is reset between sessions (see [populateSelectors]).
-        val effort = configOptions.firstOrNull {
+        val effort = selects.firstOrNull {
             it.isCategory(SessionConfigCategory.THOUGHT_LEVEL, SessionConfigCategory.EFFORT)
         }
         effortConfigId = effort?.id
@@ -579,14 +585,18 @@ class SandboxAgentMainPanel(
      * knows nothing about is still offered instead of being silently dropped — and a future one
      * needs no code at all. Whether an option exists depends on the model (`fast` is only reported
      * by the models supporting it), so an option that is no longer reported loses its selector.
+     * A `boolean` option is drawn as a toggle instead of a drop down.
      */
     private fun populateExtraConfigOptions(options: List<SessionConfigOption>) {
+        val toggles = options.filter { it.isBoolean }
         // An option without choices has nothing to pick from: its selector would only ever be
         // hidden (see [FlatSelector.setItems]).
-        val selectable = options.filter { it.choices.isNotEmpty() }
+        val selectable = options.filter { !it.isBoolean && it.choices.isNotEmpty() }
         val reported = selectable.map { it.id }.toSet()
         val stale = extraSelectors.keys - reported
         stale.forEach { configId -> extraSelectors.remove(configId)?.let { actionBarLeft.remove(it) } }
+        val staleToggles = extraToggles.keys - toggles.map { it.id }.toSet()
+        staleToggles.forEach { configId -> extraToggles.remove(configId)?.let { actionBarLeft.remove(it) } }
         selectable.forEach { option ->
             val selector = extraSelectors.getOrPut(option.id) {
                 FlatSelector<SelectorItem>(
@@ -598,8 +608,15 @@ class SandboxAgentMainPanel(
             }
             fill(selector, option)
         }
-        // Removing a component schedules no layout on its own, unlike `FlatSelector.setItems`.
-        if (stale.isNotEmpty()) {
+        toggles.forEach { option ->
+            val toggle = extraToggles.getOrPut(option.id) {
+                FlatToggle(option.presentableName) { on -> service.setConfigOption(option.id, on.toString()) }
+                    .also { actionBarLeft.add(it) }
+            }
+            toggle.setState(option.booleanValue == true, option.description)
+        }
+        // Adding or removing a component schedules no layout on its own, unlike `FlatSelector.setItems`.
+        if (stale.isNotEmpty() || staleToggles.isNotEmpty() || toggles.isNotEmpty()) {
             actionBarLeft.revalidate()
             actionBarLeft.repaint()
         }
@@ -718,6 +735,7 @@ class SandboxAgentMainPanel(
             modeSelector.isVisible = false
             effortSelector.isVisible = false
             extraSelectors.values.forEach { it.isVisible = false }
+            extraToggles.values.forEach { it.isVisible = false }
             // The commands belong to the session that just went away.
             promptInput.setAvailableCommands(emptyList())
         }

@@ -33,6 +33,19 @@ class SessionTranscriptRecorderTest {
     }
 
     @Test
+    fun `a notice is live only and leaves the stored transcript alone`() {
+        val recorder = SessionTranscriptRecorder()
+
+        recorder.record(SandboxAgentEvent.AgentMessageChunk("Retrying"))
+        recorder.record(SandboxAgentEvent.NoticeReceived("warning", "Rate limited", null))
+        recorder.record(SandboxAgentEvent.AgentMessageChunk(" now."))
+        recorder.record(SandboxAgentEvent.TurnFinished(StopReason.END_TURN))
+
+        assertEquals("Retrying now.", assertIs<AgentMessageEntry>(recorder.entries()[0]).text)
+        assertEquals(2, recorder.entries().size)
+    }
+
+    @Test
     fun `the message id is kept, and a new id starts a new message`() {
         val recorder = SessionTranscriptRecorder()
 

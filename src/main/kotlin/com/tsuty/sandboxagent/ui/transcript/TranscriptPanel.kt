@@ -17,6 +17,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.ui.jcef.JBCefApp
 import com.tsuty.sandboxagent.acp.ElicitationResult
+import com.tsuty.sandboxagent.acp.NoticeSeverity
 import com.tsuty.sandboxagent.acp.PermissionOption
 import com.tsuty.sandboxagent.acp.PlanEntry
 import com.tsuty.sandboxagent.acp.PromptAttachment
@@ -217,6 +218,24 @@ class TranscriptPanel(
 
     fun appendError(text: String) {
         block(TranscriptRole.ERROR, text)
+    }
+
+    /**
+     * A `notice` of the agent, as one line: plain text by definition, so it is escaped rather
+     * than read as Markdown. An unknown [severity] is shown as an informational one.
+     */
+    fun appendNotice(severity: String?, title: String, description: String?) {
+        val role = when (severity) {
+            NoticeSeverity.ERROR -> TranscriptRole.ERROR
+            NoticeSeverity.WARNING -> TranscriptRole.WARNING
+            else -> TranscriptRole.SYSTEM
+        }
+        val text = listOfNotNull(title.trim().ifEmpty { null }, description?.trim()?.ifEmpty { null })
+            .joinToString(" — ")
+            .ifEmpty { return }
+        endStreaming()
+        closeGroup()
+        view.post(BlockEvent(id = nextId(role.name.lowercase()), role = role, html = "<p>${TranscriptHtml.escape(text)}</p>"))
     }
 
     /** Appends a chunk of the agent answer, creating the streaming block on demand. */

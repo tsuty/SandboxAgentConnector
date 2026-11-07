@@ -55,6 +55,7 @@ enum class TranscriptRole {
     @SerialName("thought") THOUGHT,
     @SerialName("plan") PLAN,
     @SerialName("system") SYSTEM,
+    @SerialName("warning") WARNING,
     @SerialName("completion") COMPLETION,
     @SerialName("error") ERROR,
 }
