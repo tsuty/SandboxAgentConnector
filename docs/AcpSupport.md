@@ -39,7 +39,7 @@ Legend used below:
 | `terminal` | `false` (by design) | Commands run inside the sandbox. |
 | `elicitation.form` | `{}` while JCEF is available | Without JCEF the field is omitted. |
 | `elicitation.url` | Omitted | URL mode would need the target shown and consented to before navigating. |
-| `auth.terminal` | Omitted | Authentication is set up in the sandbox beforehand. |
+| `auth.terminal` | Omitted (by design) | Authentication is set up in the sandbox beforehand. |
 | `session.configOptions.boolean` | `{}` | Drawn as a toggle (§5), with or without JCEF. |
 | `session.notices` | `{}` | Shown as a line of the transcript (§4), with or without JCEF. |
 | `session.compaction` | Omitted | Compaction updates are not shown yet (§4). |
