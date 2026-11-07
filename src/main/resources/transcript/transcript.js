@@ -310,10 +310,11 @@
     function appendStream(event) {
         var entry = entries[event.id];
         if (!entry) return;
+        // After a Markdown rendering of the stream so far, the chunks go below it as plain text
+        // until the next rendering replaces the whole body.
         var stream = entry.body.querySelector('pre.stream');
         if (!stream) {
             stream = el('pre', 'stream', '');
-            entry.body.textContent = '';
             entry.body.appendChild(stream);
         }
         stream.appendChild(document.createTextNode(event.text));

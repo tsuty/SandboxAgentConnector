@@ -87,8 +87,9 @@ data class TranscriptChip(
  * Adds a block of the conversation.
  *
  * [html] is already sanitized (see [TranscriptHtml]). A block created with [streaming] `true`
- * starts as plain text instead, which is what [StreamEvent] appends to until the answer is
- * complete and [BlockHtmlEvent] replaces it with its Markdown rendering.
+ * starts as plain text instead, which is what [StreamEvent] appends to. While it streams,
+ * [BlockHtmlEvent] replaces it with the Markdown rendering of what arrived so far now and then,
+ * and the chunks after that are appended as plain text below the rendering until the next one.
  */
 @Serializable
 @SerialName("block")
@@ -105,7 +106,7 @@ data class BlockEvent(
 @SerialName("stream")
 data class StreamEvent(val id: String, val text: String) : TranscriptEvent
 
-/** Replaces the body of a block, which is how a finished stream gets its Markdown rendering. */
+/** Replaces the body of a block, which is how a stream gets its Markdown rendering. */
 @Serializable
 @SerialName("blockHtml")
 data class BlockHtmlEvent(

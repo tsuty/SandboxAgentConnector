@@ -375,15 +375,17 @@ class JcefTranscriptView(
      *
      * A [ResetEvent] drops the entries before it, the theme and the agent excepted: neither the
      * colors nor who the agent is are part of what a reset clears, and the host only sends them
-     * again when the IDE theme or the settings change. The Markdown rendering of a finished stream
-     * ([BlockHtmlEvent]) makes every chunk of it weight.
+     * again when the IDE theme or the settings change. A Markdown rendering of a stream
+     * ([BlockHtmlEvent]) covers every chunk of it before, and every earlier rendering.
      */
     private fun record(event: TranscriptEvent) {
         when (event) {
             is ThemeEvent -> forget { it is ThemeEvent }
             is AgentEvent -> forget { it is AgentEvent }
             is ResetEvent -> forget { it !is ThemeEvent && it !is AgentEvent }
-            is BlockHtmlEvent -> forget { it is StreamEvent && it.id == event.id }
+            is BlockHtmlEvent -> forget {
+                (it is StreamEvent && it.id == event.id) || (it is BlockHtmlEvent && it.id == event.id)
+            }
             else -> Unit
         }
         log += event

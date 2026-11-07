@@ -37,6 +37,7 @@ import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.datatransfer.StringSelection
 import javax.swing.JPanel
+import javax.swing.Timer
 
 /**
  * Scrollable transcript of the session: user prompts, streamed agent text, the agent's thoughts,
@@ -76,6 +77,19 @@ class TranscriptPanel(
     /** Block the agent answer streams into, `null` when nothing is streaming. */
     private var streamingId: String? = null
     private val streamed = StringBuilder()
+
+    /** Length of [streamed] the streaming block last got its Markdown rendering for. */
+    private var renderedLength = 0
+
+    /**
+     * Renders the streaming block as Markdown at most once per [STREAM_RENDER_MS] while chunks
+     * arrive, so an answer reads as Markdown shortly after its last chunk even when nothing closes
+     * it — an agent may go on working after its turn ended, and the answer it streams then is
+     * followed by no turn end and no other entry.
+     */
+    private val streamRenderTimer = Timer(STREAM_RENDER_MS) { renderStreaming() }.apply {
+        isRepeats = false
+    }
 
     private var planId: String? = null
 
@@ -211,6 +225,7 @@ class TranscriptPanel(
         val id = streamingId ?: startStreaming()
         streamed.append(text)
         view.post(StreamEvent(id, text))
+        if (!streamRenderTimer.isRunning) streamRenderTimer.restart()
     }
 
     /**
@@ -376,8 +391,10 @@ class TranscriptPanel(
     }
 
     fun clear() {
+        streamRenderTimer.stop()
         streamingId = null
         streamed.setLength(0)
+        renderedLength = 0
         planId = null
         turnStartId = null
         lastMessageId = null
@@ -430,20 +447,33 @@ class TranscriptPanel(
         val id = nextId("agent")
         streamingId = id
         streamed.setLength(0)
+        renderedLength = 0
         view.post(BlockEvent(id = id, role = TranscriptRole.AGENT, streaming = true))
         lastMessageId = id
         return id
     }
 
     /**
-     * Closes the streaming block so the next chunk starts a new one, replacing the plain text
-     * shown while the answer streamed with its Markdown rendering.
+     * Closes the streaming block so the next chunk starts a new one, giving it the Markdown
+     * rendering of everything it streamed.
      */
     private fun endStreaming() {
-        val id = streamingId ?: return
+        streamRenderTimer.stop()
+        renderStreaming()
         streamingId = null
-        val text = streamed.toString()
         streamed.setLength(0)
+        renderedLength = 0
+    }
+
+    /**
+     * Replaces the body of the streaming block with the Markdown rendering of what it streamed so
+     * far; the chunks arriving afterwards are shown as plain text below it until the next one.
+     */
+    private fun renderStreaming() {
+        val id = streamingId ?: return
+        if (streamed.length == renderedLength) return
+        renderedLength = streamed.length
+        val text = streamed.toString()
         if (text.isBlank()) return
         sources[id] = text
         val body = TranscriptHtml.renderInteractive(text)
@@ -571,12 +601,16 @@ class TranscriptPanel(
     }
 
     override fun dispose() {
+        streamRenderTimer.stop()
         permissions.clear()
         elicitations.clear()
     }
 
     private companion object {
         private val LOG = Logger.getInstance(TranscriptPanel::class.java)
+
+        /** Longest a streamed chunk waits for its Markdown rendering. */
+        private const val STREAM_RENDER_MS = 500
 
         /** Option id of the `Cancel` button a request without any option of its own gets. */
         private const val CANCEL_OPTION = "__cancel"

@@ -113,7 +113,7 @@ the window a streamed answer is coalesced in, 33 ms) and the memory a document t
 loaded again is filled from. What a later event makes stale is dropped from it: only the current
 `theme` and the current `agent` are kept, a `reset` drops the entries before it (those two excepted
 — neither the colors nor who the agent is are part of what a reset clears), the chunks of a stream
-go once its `blockHtml` arrives, and a `toast` is dropped as soon as it was shown. A replay starts
+and its earlier renderings go once a `blockHtml` of it arrives, and a `toast` is dropped as soon as it was shown. A replay starts
 with a `reset` of its own, so running it against a document that is not empty rebuilds the
 transcript instead of doubling it.
 
@@ -123,7 +123,7 @@ transcript instead of doubling it.
 | `theme` | `tokens`, `dark` | set CSS custom properties; the DOM is kept, so scroll position and folding survive a theme change |
 | `agent` | `name`, `iconSymbol` | title of the agent blocks and the `ra-icon-agent` symbol of the sprite, as the selected ACP agent presents itself (see `ICONS.md`) |
 | `block` | `id`, `role`, `html`, `streaming`, `choices` | add a transcript block |
-| `stream` | `id`, `text` | append raw text to a streaming block (no Markdown while it is incomplete) |
+| `stream` | `id`, `text` | append raw text to a streaming block, below its latest Markdown rendering if any |
 | `blockHtml` | `id`, `html`, `choices` | replace the body of a block with its rendered Markdown |
 | `attachments` | `id`, `chips` | add attachment chips to a `USER` block (a replay reports them after the prompt) |
 | `group` | `id`, `timed`, `closed`, `elapsedMs` | open / close a tool call group; the label (`Working… 12s`, `Worked 12s`) is rendered and ticked by the web side |
