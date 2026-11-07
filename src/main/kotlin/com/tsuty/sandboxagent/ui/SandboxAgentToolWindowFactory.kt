@@ -9,7 +9,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.wm.ex.ToolWindowEx
-import com.tsuty.sandboxagent.actions.OpenCacheDirectoryAction
+import com.tsuty.sandboxagent.actions.OpenLogDirectoryAction
+import com.tsuty.sandboxagent.actions.OpenSessionDirectoryAction
 import com.tsuty.sandboxagent.actions.OpenSandboxAgentSettingsAction
 import com.tsuty.sandboxagent.actions.OpenSandboxTerminalAction
 import com.tsuty.sandboxagent.actions.SearchLocalSessionsAction
@@ -32,8 +33,8 @@ class SandboxAgentToolWindowFactory : ToolWindowFactory, DumbAware {
      * the settings page are reached from the tool window they belong to instead of being hunted
      * for in the menus of the IDE.
      *
-     * Order: `Search Local Sessions`, `Open Sandbox Terminal`, a separator, then `Settings` and
-     * `Open Cache Directory` — the most used entries first, the settings/maintenance ones last.
+     * Order: `Search Local Sessions`, `Open Sandbox Terminal`, a separator, then `Settings`,
+     * `Open Session Directory` and `Open Log Directory` — the most used entries first, the settings/maintenance ones last.
      * The search lives here only (not on the tab bar, which the up to 10 tabs need the width of).
      */
     private fun installOptions(toolWindow: ToolWindow) {
@@ -43,7 +44,8 @@ class SandboxAgentToolWindowFactory : ToolWindowFactory, DumbAware {
         )
         val settings = listOfNotNull(
             action(OpenSandboxAgentSettingsAction.ID),
-            action(OpenCacheDirectoryAction.ID),
+            action(OpenSessionDirectoryAction.ID),
+            action(OpenLogDirectoryAction.ID),
         )
         val actions = if (working.isNotEmpty() && settings.isNotEmpty()) {
             working + Separator.getInstance() + settings

@@ -33,6 +33,21 @@ class SettingsSerializationTest {
         assertEquals(300, settings.apply { initializeIdleTimeoutSeconds = 300 }.initializeIdleTimeoutSecondsOrDefault())
     }
 
+    @Test
+    fun `the log retention defaults to 60 days and never reads as deleting every log`() {
+        val settings = SandboxAgentSettingsState()
+        assertEquals(60, settings.acpLogRetentionDaysOrDefault())
+        assertEquals(60, settings.apply { acpLogRetentionDays = 0 }.acpLogRetentionDaysOrDefault())
+        assertEquals(60, settings.apply { acpLogRetentionDays = -1 }.acpLogRetentionDaysOrDefault())
+        assertEquals(400, settings.apply { acpLogRetentionDays = 400 }.acpLogRetentionDaysOrDefault())
+    }
+
+    @Test
+    fun `the log retention set in the file survives a round trip`() {
+        val settings = SandboxAgentSettingsState().apply { acpLogRetentionDays = 30 }
+        assertEquals(30, roundTrip(settings).acpLogRetentionDays)
+    }
+
     private fun roundTrip(settings: SandboxAgentSettingsState): SandboxAgentSettingsState {
         val element = XmlSerializer.serialize(settings.state)
         return SandboxAgentSettingsState().apply {

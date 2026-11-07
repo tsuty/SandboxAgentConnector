@@ -88,4 +88,7 @@ tasks.runIde {
     // Internal mode: what the debug only entries of the plugin are gated on, e.g. `Show Page
     // Source` in the transcript context menu (see JcefTranscriptView).
     systemProperty("idea.is.internal", "true")
+    // Keeps the sessions and logs of this IDE apart from the ones of the IDE it is developed in,
+    // since all IDEs share them (see PluginDataDirectories).
+    systemProperty("sandboxAgent.dataDir", layout.buildDirectory.dir("sandbox-agent-data").get().asFile.path)
 }

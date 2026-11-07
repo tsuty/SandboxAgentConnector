@@ -2,7 +2,8 @@ package com.tsuty.sandboxagent.session
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.project.getProjectCachePath
+import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.project.getProjectCacheFileName
 import com.tsuty.sandboxagent.acp.PlanEntry
 import com.tsuty.sandboxagent.acp.PromptAttachment
 import com.tsuty.sandboxagent.acp.ToolCall
@@ -168,9 +169,9 @@ object SessionSnapshotMigrators {
  * Stores the rendered transcript of each session as a JSON file, so reopening a session shows its
  * history instantly instead of waiting for (or living without) an agent side replay.
  *
- * Sessions belong to one project, so the files live in the per project cache directory of the IDE
- * ([directoryFor]), one per `sessionId`: a transcript is a generated artifact that must not end up
- * in the VCS, and it must not be shared between projects either. Writes go through a temporary
+ * Sessions belong to one project, so the files live in a directory of that project outside of its
+ * tree ([directoryFor]), one per `sessionId`: a transcript must not end up in the VCS, and it must
+ * not be shared between projects either. Writes go through a temporary
  * file and an atomic move, so a crash or a disconnect in the middle of a save never leaves a
  * truncated snapshot behind.
  */
@@ -508,18 +509,23 @@ class SessionSnapshotStore(
     private fun fileOf(sessionId: String): File = File(directory, "${sanitize(sessionId)}.json")
 
     companion object {
-        const val SESSIONS_SUBDIRECTORY: String = "sandbox-agent-sessions"
-
         private val shared = ConcurrentHashMap<String, SessionSnapshotStore>()
 
         /**
          * The one store of the snapshot directory of [project]. Every tab, the session list and
          * the local session search go through it: its methods are synchronized on the instance,
          * so a second store on the same directory would read and move files without that lock.
+         * Creating it brings in the files of earlier versions, before anything reads the directory.
          */
         fun forProject(project: Project): SessionSnapshotStore {
             val directory = directoryFor(project).absoluteFile
-            return shared.computeIfAbsent(directory.path) { SessionSnapshotStore(directory) }
+            return shared.computeIfAbsent(directory.path) {
+                runCatching {
+                    val sources = LegacySessionMigration.sources(PathManager.getSystemDir().toFile(), project.getProjectCacheFileName())
+                    LegacySessionMigration.migrate(sources, directory)
+                }.onFailure { Logger.getInstance(SessionSnapshotStore::class.java).warn("Failed to migrate session files", it) }
+                SessionSnapshotStore(directory)
+            }
         }
 
         private const val BACKUP_SUFFIX = "backup"
@@ -563,12 +569,7 @@ class SessionSnapshotStore(
             return ids
         }
 
-        /**
-         * Cache directory of [project] holding its snapshots. `getProjectCachePath` keys the
-         * directory by the project path under the `system` directory of the IDE, which keeps the
-         * transcripts out of the project tree and therefore out of the VCS.
-         */
-        fun directoryFor(project: Project): File =
-            project.getProjectCachePath(SESSIONS_SUBDIRECTORY).toFile()
+        /** Directory of [project] holding its snapshots, which survives an update of the IDE. */
+        fun directoryFor(project: Project): File = PluginDataDirectories.sessions(project)
     }
 }

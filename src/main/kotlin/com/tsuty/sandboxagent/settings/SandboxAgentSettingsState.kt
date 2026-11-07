@@ -99,6 +99,16 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
         if (transcriptFontSize <= 0) DEFAULT_TRANSCRIPT_FONT_SIZE
         else transcriptFontSize.coerceIn(MIN_TRANSCRIPT_FONT_SIZE, MAX_TRANSCRIPT_FONT_SIZE)
 
+    /**
+     * Days an ACP traffic log is kept after it was last written. Not offered by the settings
+     * dialog: it is set in `sandboxAgentConnector.xml`.
+     */
+    var acpLogRetentionDays: Int = DEFAULT_ACP_LOG_RETENTION_DAYS
+
+    /** The persisted retention; a value that would delete every log means the default instead. */
+    fun acpLogRetentionDaysOrDefault(): Int =
+        if (acpLogRetentionDays <= 0) DEFAULT_ACP_LOG_RETENTION_DAYS else acpLogRetentionDays
+
     /** The persisted login shell, degrading to the default when it named an unknown one. */
     fun loginShell(): LoginShell = LoginShells.byId(loginShellId)
 
@@ -218,6 +228,8 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
         const val DEFAULT_TRANSCRIPT_FONT_SIZE: Int = 13
         const val MIN_TRANSCRIPT_FONT_SIZE: Int = 8
         const val MAX_TRANSCRIPT_FONT_SIZE: Int = 32
+
+        const val DEFAULT_ACP_LOG_RETENTION_DAYS: Int = 60
 
         fun getInstance(project: Project): SandboxAgentSettingsState =
             project.getService(SandboxAgentSettingsState::class.java)

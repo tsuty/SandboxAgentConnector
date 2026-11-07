@@ -2,6 +2,8 @@ package com.tsuty.sandboxagent.session
 
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
+import com.tsuty.sandboxagent.acp.AcpTrafficLogger
+import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
 
 /**
  * Wipes every persisted duplicate-open lock (Ph2 §3) once, right after the project is opened.
@@ -15,9 +17,18 @@ import com.intellij.openapi.startup.ProjectActivity
  * [SandboxAgentProjectCloseListener], not a replacement for it — that listener still matters for
  * releasing a lock immediately when one project window closes while another one (in the very same,
  * still running IDE) wants the session right away, well before the next restart.
+ *
+ * It also does the file work of a newly opened project off the EDT: the session files of earlier
+ * versions are brought in (see [SessionSnapshotStore.forProject]) and the expired ACP traffic logs
+ * are deleted.
  */
 class SandboxAgentStartupActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
         SessionMetadataStore.getInstance(project).clearAllLocks()
+        SessionSnapshotStore.forProject(project)
+        AcpTrafficLogger.deleteOlderThan(
+            PluginDataDirectories.logs(project),
+            SandboxAgentSettingsState.getInstance(project).acpLogRetentionDaysOrDefault(),
+        )
     }
 }

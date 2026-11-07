@@ -241,10 +241,15 @@
                 icon="/icons/settings.svg"
                 text="Settings"
                 description="Opens the settings page of the Sandbox Agent Connector plugin"/>
-        <action id="com.tsuty.sandboxagent.actions.OpenCacheDirectory"
-                class="com.tsuty.sandboxagent.actions.OpenCacheDirectoryAction"
+        <action id="com.tsuty.sandboxagent.actions.OpenSessionDirectory"
+                class="com.tsuty.sandboxagent.actions.OpenSessionDirectoryAction"
                 icon="AllIcons.General.OpenDisk"
-                text="Open Cache Directory"
-                description="Opens the directory the local session cache of this project is stored in"/>
+                text="Open Session Directory"
+                description="Opens the directory the local session files of this project are stored in"/>
+        <action id="com.tsuty.sandboxagent.actions.OpenLogDirectory"
+                class="com.tsuty.sandboxagent.actions.OpenLogDirectoryAction"
+                icon="AllIcons.General.OpenDisk"
+                text="Open Log Directory"
+                description="Opens the directory the ACP traffic logs of this project are stored in"/>
     </actions>
 </idea-plugin>

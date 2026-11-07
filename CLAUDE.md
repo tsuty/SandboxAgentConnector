@@ -45,12 +45,13 @@ Package root: `com.tsuty.sandboxagent`, under `src/main/kotlin/...` (tests mirro
   dispatch, timeouts), `AcpModels` (protocol data classes, tolerant of schema variance — capability flags
   accept `true` or `{}`, timestamps accept ms/s/ISO-8601), `SandboxProcessManager` (builds and launches the
   `exec -i "<name>" <command>` argument vector — never through a shell), `AcpTrafficLogger` (per-session
-  JSON-RPC audit log under the IDE log dir), `AgentOutputTail` (keeps the last stderr and non-JSON stdout lines for
+  JSON-RPC audit log under the version independent `PluginDataDirectories`, expired logs deleted on project open), `AgentOutputTail` (keeps the last stderr and non-JSON stdout lines for
   timeout/error messages), `StartupDiagnosis` (messages of a failed start, built only from checks every sandbox
   CLI and agent share: CLI on the `PATH` → `exec … echo` → agent start → `exec … <launcher> --help` after a failure).
 - **`session/`** — Session lifecycle independent of any single connection: `SessionMetadataStore`
   (history: list/rename/delete), `SessionSnapshotStore` (JSON transcript snapshots at turn boundaries,
-  under the IDE per-project cache dir, atomic writes, `schemaVersion`), `SessionTranscriptRecorder`
+  under the version independent per-project `PluginDataDirectories`, atomic writes, `schemaVersion`),
+  `LegacySessionMigration` (one-time copy of the snapshots an earlier version kept per IDE version), `SessionTranscriptRecorder`
   (builds snapshots from live transcript state), `SessionLockRegistry` (prevents the same session being
   opened twice), `SandboxAgentStartupActivity` / `SandboxAgentProjectCloseListener` (clear stale
   duplicate-open locks on project open/close so a crash never wedges the next launch).

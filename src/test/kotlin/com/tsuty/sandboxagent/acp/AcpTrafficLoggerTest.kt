@@ -99,4 +99,35 @@ class AcpTrafficLoggerTest {
         val lines = dir.listFiles()!!.single().toPath().readLines()
         assertFalse(lines.any { it.contains("session/cancel") })
     }
+
+    @Test
+    fun `only the logs written before the retention period are deleted`() {
+        val dir = Files.createTempDirectory("acp-log-test").toFile()
+        val day = 24L * 60 * 60 * 1000
+        val now = 100 * day
+        fun log(name: String, age: Long) = java.io.File(dir, name).apply {
+            writeText("")
+            setLastModified(now - age)
+        }
+        val expired = log("20260101_000000_old.log", 60 * day + 1)
+        val onTheLimit = log("20260101_000000_limit.log", 60 * day)
+        val recent = log("20260101_000000_new.log", day)
+        val foreign = log("notes.log", 90 * day)
+
+        AcpTrafficLogger.deleteOlderThan(dir, days = 60, now = now)
+
+        assertFalse(expired.exists())
+        assertTrue(onTheLimit.exists())
+        assertTrue(recent.exists())
+        assertTrue(foreign.exists())
+    }
+
+    @Test
+    fun `a missing log directory is nothing to delete`() {
+        val dir = java.io.File(Files.createTempDirectory("acp-log-test").toFile(), "missing")
+
+        AcpTrafficLogger.deleteOlderThan(dir, days = 60)
+
+        assertFalse(dir.exists())
+    }
 }

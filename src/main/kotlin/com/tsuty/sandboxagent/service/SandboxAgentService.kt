@@ -74,6 +74,7 @@ import com.tsuty.sandboxagent.acp.userPromptText
 import com.tsuty.sandboxagent.session.LastSelectorsStore
 import com.tsuty.sandboxagent.session.LocalSessionFile
 import com.tsuty.sandboxagent.session.LocalSessionIndex
+import com.tsuty.sandboxagent.session.PluginDataDirectories
 import com.tsuty.sandboxagent.session.SaveResult
 import com.tsuty.sandboxagent.session.SessionLockRegistry
 import com.tsuty.sandboxagent.session.SessionMetadataStore
@@ -672,7 +673,7 @@ class SandboxAgentService(
         persistedConfig()?.let { config = it }
         setState(SessionState.CONNECTING, "Checking sandbox...")
         val manager = SandboxProcessManager(config, variables(agentCommand))
-        val logger = AcpTrafficLogger()
+        val logger = AcpTrafficLogger(PluginDataDirectories.logs(project))
         val acpClient = AcpClient(writeLine = { manager.writeLine(it) }, trafficLogger = logger)
         acpClient.onNotification = ::handleNotification
         acpClient.onServerRequest = ::handleServerRequest
