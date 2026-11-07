@@ -47,10 +47,17 @@ object TranscriptImages {
         return """<p><img class="transcript-image" src="$src" alt="$alt"></p>"""
     }
 
-    /** Enough Base64 for the 12 bytes the longest signature ([rasterType]) needs. */
+    /** Enough Base64 for the [SIGNATURE_BYTES] the longest signature ([rasterType]) needs. */
     private const val HEAD_CHARS = 16
 
-    private fun rasterType(head: ByteArray): String? = when {
+    /** Bytes [rasterType] reads at most. */
+    const val SIGNATURE_BYTES: Int = 12
+
+    /**
+     * The raster type the first bytes of an image say it is, one of [RASTER_TYPES]; `null` for
+     * anything else. The same test decides what is drawn and what a prompt may carry.
+     */
+    fun rasterType(head: ByteArray): String? = when {
         head.startsWith(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) -> "image/png"
         head.startsWith(0xFF, 0xD8, 0xFF) -> "image/jpeg"
         head.startsWith(*"GIF87a".codes()) || head.startsWith(*"GIF89a".codes()) -> "image/gif"

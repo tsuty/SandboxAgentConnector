@@ -825,4 +825,17 @@ class AcpModelsTest {
 
         assertEquals("Bash", started.mergeWith(assertIs<ToolCallProgressUpdate>(update).toolCall).name)
     }
+
+    @Test
+    fun `an attached image goes as an image block whose uri a replay reads back into its chip`() {
+        val item = AcpContextItem(path = "/workspace/shot.png", content = "", image = PromptImage("image/png", "iVBORw0KGgo="))
+
+        val block = assertIs<ImageContentBlock>(item.toContentBlock(embeddedContext = false))
+
+        assertEquals(ImageContentBlock("iVBORw0KGgo=", "image/png", "file:///workspace/shot.png"), block)
+        assertEquals(PromptAttachment(path = "/workspace/shot.png"), block.promptAttachments.single())
+        // The chip names the file alone: the image itself is never stored.
+        assertEquals(PromptAttachment(path = "/workspace/shot.png"), item.toAttachment())
+        assertTrue(ImageContentBlock("AAAA", "image/png").promptAttachments.isEmpty())
+    }
 }

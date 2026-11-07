@@ -468,6 +468,7 @@ val ContentBlock.promptAttachments: List<PromptAttachment>
     get() = when (this) {
         is EmbeddedResourceContentBlock -> listOfNotNull(promptAttachmentOf(resource.uri, resource.text))
         is ResourceLinkContentBlock -> listOfNotNull(promptAttachmentOf(uri))
+        is ImageContentBlock -> listOfNotNull(uri?.let { promptAttachmentOf(it) })
         is TextContentBlock -> attachmentsInMarkup(text)
         else -> emptyList()
     }
@@ -1413,12 +1414,17 @@ data class AcpContextItem(
     val content: String,
     val startLine: Int? = null,
     val endLine: Int? = null,
+    /** An attached image file: sent as an `image` block instead of text (see [toContentBlock]). */
+    val image: PromptImage? = null,
 ) {
     val presentableRange: String?
         get() = if (startLine != null && endLine != null) "$startLine-$endLine" else null
 
     fun toContentBlock(embeddedContext: Boolean = true): ContentBlock =
-        if (embeddedContext) {
+        if (image != null) {
+            // The URI is what a replay reads the chip back from (see [promptAttachments]).
+            ImageContentBlock(data = image.data, mimeType = image.mimeType, uri = uri())
+        } else if (embeddedContext) {
             EmbeddedResourceContentBlock(EmbeddedResource(uri = uri(), text = content))
         } else {
             TextContentBlock(inlined())
@@ -1452,6 +1458,13 @@ data class AcpContextItem(
         return presentableRange?.let { "$base#L$it" } ?: base
     }
 }
+
+/**
+ * The image of an attached file, as an `image` block carries it: [data] is Base64. Only ever
+ * sent, never stored — the chip a transcript keeps names the file alone (see [PromptAttachment]).
+ */
+@Serializable
+data class PromptImage(val mimeType: String, val data: String)
 
 /** Characters a file URI path keeps as they are; everything else is percent-encoded as UTF-8. */
 private const val URI_PATH_UNRESERVED = "-._~/:"

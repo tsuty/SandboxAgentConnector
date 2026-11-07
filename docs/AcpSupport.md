@@ -112,7 +112,7 @@ Any variant the plugin does not know is ignored and logged, never a decoding fai
 | Prompt: `text` | Yes | |
 | Prompt: `resource` (embedded) | Yes | Attached files and selections, when the agent declares `promptCapabilities.embeddedContext`. Otherwise they are inlined into a `text` block as `<context ref="file://…">…</context>`. |
 | Prompt: `resource_link` | No | |
-| Prompt: `image` | No | Planned: attached image files, when `promptCapabilities.image` is declared, with a thumbnail chip. Until then a binary file cannot be attached at all. |
+| Prompt: `image` | Yes | Attached image files (PNG, JPEG, GIF, WebP up to 5 MiB) when `promptCapabilities.image` is declared, with the file's `file://` URI as `uri`. Their chip shows a thumbnail. Not from the clipboard. |
 | Prompt: `audio` | No | |
 | Shown: `text` | Yes | Markdown, sanitized. |
 | Shown: `resource_link` / `resource` | Partial | As text: the link's text, title, name or URI; the resource's text. |

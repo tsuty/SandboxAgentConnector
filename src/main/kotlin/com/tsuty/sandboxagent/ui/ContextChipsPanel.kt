@@ -24,6 +24,7 @@ import com.tsuty.sandboxagent.acp.AcpContextItem
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
 import java.awt.Color
 import java.awt.FlowLayout
+import javax.swing.Icon
 import javax.swing.JComponent
 import javax.swing.JPanel
 
@@ -42,7 +43,8 @@ class ContextChipsPanel(private val project: Project) :
     // chips wrap, which clipped every attachment past the first row out of sight.
     JPanel(WrapFlowLayout(FlowLayout.LEFT, JBUI.scale(CHIP_GAP), JBUI.scale(CHIP_GAP))), Disposable {
 
-    private data class Entry(val key: String, val label: String, val item: AcpContextItem)
+    /** [icon] replaces the icon of the file type; it is the thumbnail of an attached image. */
+    private data class Entry(val key: String, val label: String, val item: AcpContextItem, val icon: Icon? = null)
 
     private val entries = LinkedHashMap<String, Entry>()
     /** Active file and its selection shown because of auto attach; not part of [contextItems] until sent. */
@@ -124,6 +126,17 @@ class ContextChipsPanel(private val project: Project) :
         }
         val item = AcpContextItem(path = file.path, content = content)
         addEntry(Entry("file:${file.path}", file.name, item))
+        return true
+    }
+
+    /**
+     * Attaches an image file read by [PromptImages], with a thumbnail as its chip: what an image
+     * shows cannot be told from its name, and the chip is where the prompt shows what it carries.
+     */
+    fun attachImage(file: VirtualFile, read: PromptImages.Read.Image): Boolean {
+        if (!file.isValid || !AttachFileUtils.isInsideProject(file, project)) return false
+        val item = AcpContextItem(path = file.path, content = "", image = read.image)
+        addEntry(Entry("image:${file.path}", file.name, item, PromptImages.thumbnail(read.bytes)))
         return true
     }
 
@@ -279,7 +292,7 @@ class ContextChipsPanel(private val project: Project) :
      */
     private fun chip(entry: Entry): JComponent = PromptAttachmentChips.chip(
         label = entry.label,
-        icon = PromptAttachmentChips.iconFor(entry.item.path, selection = entry.key.startsWith("selection:")),
+        icon = entry.icon ?: PromptAttachmentChips.iconFor(entry.item.path, selection = entry.key.startsWith("selection:")),
         tooltip = entry.item.path,
         onClick = openAction(entry),
         onRemove = {

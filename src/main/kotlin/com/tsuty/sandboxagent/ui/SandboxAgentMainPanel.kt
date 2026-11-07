@@ -11,6 +11,8 @@ import com.intellij.openapi.keymap.KeymapManagerListener
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.text.StringUtil
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.AnimatedIcon
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
@@ -334,11 +336,7 @@ class SandboxAgentMainPanel(
     private fun actionBar(): JPanel {
         lateinit var attachFile: FlatIconButton
         attachFile = FlatIconButton(AllIcons.Actions.AddFile, "Attach File") {
-            AttachFilePopup.show(attachFile, project) { file ->
-                if (!chips.attachVirtualFile(file) && !file.isDirectory && file.fileType.isBinary) {
-                    chatLog.appendSystemMessage("${file.name} is a binary file, which cannot be attached")
-                }
-            }
+            AttachFilePopup.show(attachFile, project) { file -> attachFile(file) }
         }
         val attachSelection = FlatIconButton(AllIcons.Actions.AddList, "Attach Selection") {
             if (!chips.attachSelection()) chatLog.appendSystemMessage("Nothing is selected in the editor")
@@ -635,6 +633,34 @@ class SandboxAgentMainPanel(
             choice.value?.let { SelectorItem(it, choice.presentableName, choice.description) }
         }
         selector.setItems(items, items.firstOrNull { it.id == option.currentValue })
+    }
+
+    /**
+     * A text file or a directory is attached as such. Of the binary files only images are, and
+     * only for an agent that declared it takes them (`promptCapabilities.image`): anything else
+     * would reach the agent as garbled text.
+     */
+    private fun attachFile(file: VirtualFile) {
+        if (file.isDirectory || !file.fileType.isBinary) {
+            chips.attachVirtualFile(file)
+            return
+        }
+        when (val read = PromptImages.read(file)) {
+            PromptImages.Read.NotAnImage ->
+                chatLog.appendSystemMessage("${file.name} is a binary file, which cannot be attached")
+            is PromptImages.Read.TooLarge ->
+                chatLog.appendSystemMessage(
+                    "${file.name} is ${StringUtil.formatFileSize(read.bytes)}; " +
+                        "images of up to ${StringUtil.formatFileSize(PromptImages.MAX_BYTES)} can be attached",
+                )
+            is PromptImages.Read.Image -> when {
+                service.state != SessionState.READY ->
+                    chatLog.appendSystemMessage("Images can be attached once the agent is connected")
+                service.agentCapabilities.promptCapabilities?.image != true ->
+                    chatLog.appendSystemMessage("The agent of this tab does not take images, so ${file.name} cannot be attached")
+                else -> chips.attachImage(file, read)
+            }
+        }
     }
 
     private fun applyModel(modelId: String) {

@@ -1453,12 +1453,17 @@ class SandboxAgentService(
     /**
      * Text first, then every attached file / selection: as an embedded resource block when the
      * agent declares `embeddedContext`, inlined into a text block otherwise (see [AcpContextItem]).
+     * An attached image goes as an `image` block, and only to an agent declaring `image`: the
+     * panel refuses to attach one otherwise, so this is a guard, not a path the UI takes.
      */
     private fun promptBlocks(prompt: String, context: List<AcpContextItem>): List<ContentBlock> {
-        val embeddedContext = agentCapabilities.promptCapabilities?.embeddedContext == true
+        val capabilities = agentCapabilities.promptCapabilities
+        val embeddedContext = capabilities?.embeddedContext == true
+        val sendable = context.filter { it.image == null || capabilities?.image == true }
+        if (sendable.size < context.size) log.warn("Dropped ${context.size - sendable.size} image(s) the agent does not take")
         return buildList {
             add(TextContentBlock(prompt))
-            context.forEach { add(it.toContentBlock(embeddedContext)) }
+            sendable.forEach { add(it.toContentBlock(embeddedContext)) }
         }
     }
 
