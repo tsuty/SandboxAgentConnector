@@ -85,7 +85,7 @@ This ensures versatility across alternative sandbox implementations and allows c
 * **Detach**: Stopping only terminates the agent process launched via Exec, leaving the sandbox container itself running.
 
 ### 3.3. Agent Communication Protocol (ACP: Agent Client Protocol v1)
-Complies with **ACP v1** based on JSON-RPC 2.0 to handle prompt exchanges, permission requests (tool execution / file modifications), and streaming notifications.
+Complies with **ACP v1** based on JSON-RPC 2.0 to handle prompt exchanges, permission requests (tool execution / file modifications), and streaming notifications. The support status of each ACP feature, and the ACP release it was checked against, is kept in [AcpSupport.md](AcpSupport.md).
 
 * **Version Negotiation**: Sends `protocolVersion: 1` and `clientInfo` (`SandboxAgentConnector` / `1.0.0`) in `initialize`. If the agent returns less than 1, the connection is treated as an error.
 * **Client Capabilities**: For complete sandbox containment, `fs.readTextFile`, `fs.writeTextFile`, and `terminal` are all reported as `false`. `elicitation` advertises **form mode only** (`{"form": {}}`), and only when the transcript can be drawn with JCEF; without JCEF, or for URL mode (which would need the target shown and consented to before navigating), it is left out, which ACP reads as "unsupported". This is also what lets the Claude agent adapter keep its `AskUserQuestion` tool: it disables the tool for a client that does not advertise `elicitation.form`.

@@ -14,7 +14,8 @@ The plugin never starts/stops the sandbox itself — it only attaches to (and de
 running one via `<sandbox command> exec -i "<sandbox name>" <agent command>`.
 
 For full architecture and protocol details, see `docs/Specification.md` (long, authoritative — read it
-before touching ACP message handling, session restoration, or settings). Also useful:
+before touching ACP message handling, session restoration, or settings). `docs/AcpSupport.md` is the
+ACP feature support matrix — update it whenever ACP handling changes. Also useful:
 `docs/development/TRANSCRIPT_WEBVIEW.md` (JCEF host↔web protocol and security boundary) and
 `docs/development/ICONS.md` (icon inventory/drawing conventions).
 
@@ -33,8 +34,9 @@ before touching ACP message handling, session restoration, or settings). Also us
 - `kotlinx-coroutines` is bundled by the IntelliJ Platform — never add it as a Gradle dependency.
 - There is a hand-written fake ACP agent at `tools/fake-acp-agent/switch_mode_agent.py` for exercising
   `switch_mode` permission flows without a real agent (see its README for how to point a connection at it).
-- Raising the version: follow `docs/development/RELEASE.md` — `pluginVersion` in `gradle.properties` and a new
-  `<change-notes>` section in `plugin.xml` go together in one commit, before the `v<version>` tag is pushed.
+- Raising the version: follow `docs/development/RELEASE.md` — `pluginVersion` in `gradle.properties`, a new
+  `<change-notes>` section in `plugin.xml` and the update of `docs/AcpSupport.md` go together in one commit,
+  before the `v<version>` tag is pushed.
 
 ## Architecture
 

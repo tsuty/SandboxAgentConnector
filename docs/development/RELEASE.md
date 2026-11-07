@@ -14,10 +14,11 @@ Publishing and signing for JetBrains Marketplace (`publishPlugin` / `signPlugin`
 
 ## 1. Raising the version
 
-Do both of the following in the same commit:
+Do all of the following in the same commit:
 
 1. Set `pluginVersion` in `../../gradle.properties` to the new version (without the leading `v`).
 2. Add a section for the new version to `<change-notes>` in `../../src/main/resources/META-INF/plugin.xml`.
+3. Bring `../AcpSupport.md` up to date (see below).
 
 ### Writing the change notes
 
@@ -33,6 +34,16 @@ The commits to go through are listed with:
 ```bash
 git log --oneline v<previous version>..HEAD
 ```
+
+### Updating the ACP support status
+
+`AcpSupport.md` states which ACP release the plugin was checked against and for which plugin version.
+
+- Set the plugin version in its §1 to the new version.
+- Check the ACP releases published since the release named in its §1, following its §9: add every newly
+  stabilized feature, and update the release in §1 even when nothing changed for the plugin.
+- Make sure the ACP changes of this release (a new method, a newly handled update, a fixed deviation) are
+  reflected in it.
 
 ---
 
@@ -76,6 +87,7 @@ git log --oneline v<previous version>..HEAD
 
 - [ ] `pluginVersion` in `gradle.properties` is the new version
 - [ ] `<change-notes>` starts with `<h3><version></h3>` and covers every user-facing change since the previous tag
+- [ ] `AcpSupport.md` names the new plugin version and the latest ACP release, and reflects the ACP changes of this release
 - [ ] The tag is `v` + `pluginVersion`
 - [ ] The tag is annotated and its message is the release notes, matching `<change-notes>`
 - [ ] The release has `SandboxAgentConnector-<version>.zip` attached and shows the notes of the tag

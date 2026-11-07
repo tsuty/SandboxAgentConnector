@@ -14,7 +14,7 @@ While leveraging the IDE's lightweight nature and rich GUI (editor, Diff viewers
 - **Local Session Protection**: Transcripts are kept locally and are never lost to the agent. A session with local history is drawn from it right away, and the history the agent replays in the background is compared with it by the ids of the agent messages (ACP `messageId`): only when they differ is the local transcript saved as a backup before the agent's version replaces it (backups are never deleted on their own; the list shows the 20 newest). Deleting a session moves its transcript and its backups aside instead of erasing them. A backup is moved aside from its Read Only tab, and `Delete Backups Permanently…` of a session erases all of its backups, those moved aside included, after a confirmation. The session list shows at a glance whether a session is stored locally and has backups, and a backup or a deleted session opens in a **Read Only tab** that never connects to the sandbox.
 - **Local Session Search**: `Search Local Sessions` in the tool window options menu searches the full text of the locally stored sessions and their backups, deleted sessions included on request. The matching part is previewed as pretty printed JSON with the match highlighted, and a result reopens the session or opens it in a Read Only tab.
 - **Multiple Agents**: Several ACP agents can be enabled side by side in the same sandbox, each tab running one of them with its own icon and color. Sessions stay with the agent they belong to, and a session of an agent that is no longer enabled still opens read only.
-- **ACP (Agent Client Protocol) Compliant**: Complies with JSON-RPC 2.0-based ACP v1, enabling connections to ACP-compatible agents such as Claude Code.
+- **ACP (Agent Client Protocol) Compliant**: Complies with JSON-RPC 2.0-based ACP v1, enabling connections to ACP-compatible agents such as Claude Code. Which ACP features are supported is listed in [docs/AcpSupport.md](docs/AcpSupport.md).
 
 ---
 
@@ -91,6 +91,8 @@ For more detailed specifications and design information, refer to the following 
 
 - **[Specification & Architecture Design (docs/Specification.md)](docs/Specification.md)**:
   Architecture diagrams, file synchronization flow, ACP protocol specifications, UI/UX details, configuration settings, etc.
+- **[ACP Support Status (docs/AcpSupport.md)](docs/AcpSupport.md)**:
+  Which ACP methods, updates and stabilized features the plugin supports, checked against which ACP release.
 - **[Local Installation Guide (docs/development/LOCAL_INSTALL.md)](docs/development/LOCAL_INSTALL.md)**:
   Build from source instructions, IDE installation steps, verification, and troubleshooting.
 - **[Transcript Web View (docs/development/TRANSCRIPT_WEBVIEW.md)](docs/development/TRANSCRIPT_WEBVIEW.md)**:
