@@ -20,6 +20,9 @@ import com.tsuty.sandboxagent.acp.AvailableCommand
 import com.tsuty.sandboxagent.acp.AvailableCommandsUpdate
 import com.tsuty.sandboxagent.acp.ClientCapabilities
 import com.tsuty.sandboxagent.acp.ClientSessionCapabilities
+import com.tsuty.sandboxagent.acp.CompactionStatus
+import com.tsuty.sandboxagent.acp.CompactionSummaryChunk
+import com.tsuty.sandboxagent.acp.CompactionUpdate
 import com.tsuty.sandboxagent.acp.ConfigOptionUpdate
 import com.tsuty.sandboxagent.acp.ContentBlock
 import com.tsuty.sandboxagent.acp.CurrentModeUpdate
@@ -300,6 +303,15 @@ sealed interface SandboxAgentEvent {
         val request: ElicitationRequest,
     ) : SandboxAgentEvent
 
+    /**
+     * A compaction of the context was created or changed (`compaction_update`). The first event
+     * of a `compactionId` fixes its place in the transcript; later ones patch it there.
+     */
+    data class CompactionUpdated(val update: CompactionUpdate) : SandboxAgentEvent
+
+    /** Text appended to the summary of a compaction, which it opens when it is new. */
+    data class CompactionSummaryAppended(val compactionId: String, val text: String) : SandboxAgentEvent
+
     /** A `notice` session update: [severity] is `info`, `warning`, `error` or anything else. */
     data class NoticeReceived(val severity: String?, val title: String, val description: String?) : SandboxAgentEvent
 
@@ -505,6 +517,9 @@ class SandboxAgentService(
     private val elicitations = ConcurrentHashMap<String, ElicitationRequest>()
 
     /** Tool calls of the running turn that have not ended, marked cancelled by [cancelPrompt]. */
+    /** Compactions reported `in_progress` and not ended yet (see [cancelOpenCompactions]). */
+    private val openCompactions: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
     private val unfinishedToolCalls = UnfinishedToolCalls()
 
     /**
@@ -902,6 +917,7 @@ class SandboxAgentService(
     private fun adoptSession(sessionId: String, title: String?, pristine: Boolean = false) {
         sessionIdRef.set(sessionId)
         recorder.clear()
+        openCompactions.clear()
         sessionTitleRef.set(metadataStore()?.renameOverride(sessionId) ?: title)
         if (pristine) {
             // An unused session is not part of the history yet: it is only recorded there once it
@@ -1518,8 +1534,20 @@ class SandboxAgentService(
      */
     private fun finishTurn(stopReason: String?) {
         if (turnRunningRef.compareAndSet(true, false)) {
+            cancelOpenCompactions()
             publish(SandboxAgentEvent.TurnFinished(stopReason))
         }
+    }
+
+    /**
+     * A compaction belongs to the turn it ran in: one the agent never reported an end for is
+     * marked `cancelled` when the turn ends, as the unfinished tool calls are (claude-acp does
+     * the same itself, so this only covers the agents that do not).
+     */
+    private fun cancelOpenCompactions() {
+        val open = openCompactions.toList()
+        openCompactions.clear()
+        open.forEach { publish(SandboxAgentEvent.CompactionUpdated(CompactionUpdate(it, CompactionStatus.CANCELLED))) }
     }
 
     /** Answers a pending `session/request_permission`. Safe to call twice. */
@@ -1690,6 +1718,7 @@ class SandboxAgentService(
         sessionTitleRef.set(null)
         suppressedReplays.clear()
         recorder.clear()
+        openCompactions.clear()
         // A closed session runs no turn: the editors must not stay locked behind it.
         workspaceGuard()?.reset(this)
         if (state != SessionState.ERROR) {
@@ -1837,6 +1866,15 @@ class SandboxAgentService(
                 log.debug("available_commands_update: ${update.availableCommands.size} commands")
                 publish(SandboxAgentEvent.CommandsAvailable(update.availableCommands))
             }
+            is CompactionUpdate -> {
+                if (update.status == CompactionStatus.IN_PROGRESS) openCompactions += update.compactionId
+                else openCompactions -= update.compactionId
+                publish(SandboxAgentEvent.CompactionUpdated(update))
+            }
+            is CompactionSummaryChunk -> {
+                openCompactions += update.compactionId
+                publish(SandboxAgentEvent.CompactionSummaryAppended(update.compactionId, update.content.plainText))
+            }
             is UsageUpdate -> {
                 log.debug("usage_update: used=${update.used} size=${update.size} cost=${update.cost}")
                 publish(SandboxAgentEvent.UsageUpdated(update.used, update.size, update.cost))
@@ -1862,6 +1900,9 @@ class SandboxAgentService(
         is ToolCallUpdateEvent -> listOf(SandboxAgentEvent.ToolCallStarted(update.toolCall))
         is ToolCallProgressUpdate -> listOf(SandboxAgentEvent.ToolCallUpdated(update.toolCall))
         is PlanUpdate -> listOf(SandboxAgentEvent.PlanUpdated(update.entries))
+        is CompactionUpdate -> listOf(SandboxAgentEvent.CompactionUpdated(update))
+        is CompactionSummaryChunk ->
+            listOf(SandboxAgentEvent.CompactionSummaryAppended(update.compactionId, update.content.plainText))
         else -> emptyList()
     }
 

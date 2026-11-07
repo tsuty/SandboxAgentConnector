@@ -118,6 +118,23 @@ pre.stream {
 
 .notice-body { min-width: 0; overflow-wrap: anywhere; }
 
+/* ---------- compactions ---------- */
+
+/* A rule across the transcript: what is above it was summarized for the agent. */
+.compaction {
+  border-top: 1px dashed var(--ra-border, #d0d0d0);
+  padding-top: 4px;
+  color: var(--ra-quiet, #6e6e6e);
+  font-size: var(--ra-small-size, 11px);
+}
+
+.compaction-line { display: flex; align-items: center; gap: 4px; }
+
+.compaction--failed .anchor,
+.compaction--failed .compaction-line { color: var(--ra-error, #c75450); }
+
+.compaction-summary { margin-top: 4px; }
+
 /* ---------- folding ---------- */
 
 .anchor {

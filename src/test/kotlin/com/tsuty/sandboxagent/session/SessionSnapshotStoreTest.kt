@@ -569,4 +569,17 @@ class SessionSnapshotStoreTest {
         file.setLastModified(file.lastModified() + 10_000)
         assertEquals("claude-acp", store.ownerOf("sess_1", "claude-acp"))
     }
+
+    @Test
+    fun `a compaction is stored with its summary and read back`() {
+        val (store, _) = tempStore()
+        val entries = listOf(
+            AgentMessageEntry("Before."),
+            CompactionEntry("cmp_1", "completed", summary = "We fixed the parser.", error = null),
+        )
+
+        store.save("sess_1", entries, title = null)
+
+        assertEquals(entries, assertNotNull(store.load("sess_1")).entries)
+    }
 }

@@ -12,6 +12,7 @@ import kotlinx.serialization.descriptors.nullable
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonClassDiscriminator
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
@@ -261,12 +262,15 @@ data class ClientSessionCapabilities(
     val configOptions: SessionConfigOptionsCapabilities? = null,
     /** `notice` session updates, shown as a line of the transcript. */
     val notices: JsonObject? = null,
+    /** `compaction_update` / `compaction_summary_chunk`, shown as an entry of the transcript. */
+    val compaction: JsonObject? = null,
 ) {
     companion object {
-        /** Everything this plugin supports: boolean config options and notices. */
+        /** Everything this plugin supports: boolean config options, notices and compactions. */
         val SUPPORTED = ClientSessionCapabilities(
             configOptions = SessionConfigOptionsCapabilities(boolean = JsonObject(emptyMap())),
             notices = JsonObject(emptyMap()),
+            compaction = JsonObject(emptyMap()),
         )
     }
 }
@@ -1161,6 +1165,78 @@ object NoticeSeverity {
     const val ERROR = "error"
 }
 
+/**
+ * A field with patch semantics: left as it was when omitted, cleared by `null`, replaced by a
+ * value. ACP uses them for the `summary` and the `error` of a [CompactionUpdate].
+ */
+sealed interface Patch<out T> {
+    data object Keep : Patch<Nothing>
+
+    data object Clear : Patch<Nothing>
+
+    data class Set<T>(val value: T) : Patch<T>
+}
+
+/**
+ * [current] once this patch is applied to it. An extension rather than a member: [Patch.Keep] is
+ * a `Patch<Nothing>`, and a member taking a `T` would cast [current] to `Nothing` at run time.
+ */
+fun <T> Patch<T>.applyTo(current: T?): T? = when (this) {
+    Patch.Keep -> current
+    Patch.Clear -> null
+    is Patch.Set -> value
+}
+
+/**
+ * `compaction_update`: a compaction of the context was created or changed. The first update of a
+ * [compactionId] fixes where it stands in the transcript; later ones patch it in place. Decoded by
+ * hand (see [AcpCodec.decodeSessionUpdate]), as kotlinx tells an omitted field from a `null` one
+ * no better than a default does.
+ */
+data class CompactionUpdate(
+    val compactionId: String,
+    /** `in_progress`, `completed`, `failed`, `cancelled`, or a future / custom status. */
+    val status: String,
+    /** The whole summary as text; `summary: []` clears it like `null` does. */
+    val summary: Patch<String> = Patch.Keep,
+    val error: Patch<String> = Patch.Keep,
+) : SessionUpdate {
+    companion object {
+        fun decode(obj: JsonObject): CompactionUpdate? {
+            val id = (obj["compactionId"] as? JsonPrimitive)?.contentOrNull ?: return null
+            val status = (obj["status"] as? JsonPrimitive)?.contentOrNull ?: return null
+            val summary = when (val raw = obj["summary"]) {
+                null -> Patch.Keep
+                is JsonArray -> raw.joinToString("") { AcpCodec.decodeContentBlock(it).plainText }
+                    .let { if (raw.isEmpty()) Patch.Clear else Patch.Set(it) }
+                else -> Patch.Clear
+            }
+            val error = when (val raw = obj["error"]) {
+                null -> Patch.Keep
+                is JsonPrimitive -> raw.contentOrNull?.let { Patch.Set(it) } ?: Patch.Clear
+                else -> Patch.Clear
+            }
+            return CompactionUpdate(id, status, summary, error)
+        }
+    }
+}
+
+/** `compaction_summary_chunk`: text appended to the summary of a compaction. */
+@Serializable
+@SerialName("compaction_summary_chunk")
+data class CompactionSummaryChunk(
+    val compactionId: String,
+    @Serializable(with = ContentBlockSerializer::class) val content: ContentBlock,
+) : SessionUpdate
+
+/** `status` of a [CompactionUpdate]. */
+object CompactionStatus {
+    const val IN_PROGRESS = "in_progress"
+    const val COMPLETED = "completed"
+    const val FAILED = "failed"
+    const val CANCELLED = "cancelled"
+}
+
 /** Fallback for `sessionUpdate` variants this plugin version does not know yet. */
 @Serializable
 @SerialName("_unknown")
@@ -1309,6 +1385,8 @@ object AcpCodec {
             "config_option_update" -> ConfigOptionUpdate.serializer()
             "usage_update" -> UsageUpdate.serializer()
             "notice" -> NoticeUpdate.serializer()
+            "compaction_summary_chunk" -> CompactionSummaryChunk.serializer()
+            "compaction_update" -> return CompactionUpdate.decode(obj) ?: UnknownSessionUpdate(rawType = type, raw = obj)
             else -> null
         }
         return decodeOrFallback(serializer, obj) { UnknownSessionUpdate(rawType = type, raw = obj) }

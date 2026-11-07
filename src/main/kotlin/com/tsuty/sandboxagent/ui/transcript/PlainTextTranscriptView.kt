@@ -66,6 +66,8 @@ class PlainTextTranscriptView : TranscriptView {
                 is BlockHtmlEvent -> Unit
                 is AttachmentsEvent -> line(event.chips.joinToString(", ") { it.label })
                 is ImagesEvent -> line(event.alt)
+                // Redrawn in place in the browser; here each state is a line of its own.
+                is CompactionEvent -> line(event.headline)
                 is ToolCallEvent -> line(event.switchMode?.headline ?: event.question?.headline ?: event.anchor)
                 is PermissionEvent -> line(event.headline)
                 is PermissionResolvedEvent -> line(event.status)

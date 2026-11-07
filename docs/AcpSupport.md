@@ -42,7 +42,7 @@ Legend used below:
 | `auth.terminal` | Omitted (by design) | Authentication is set up in the sandbox beforehand. |
 | `session.configOptions.boolean` | `{}` | Drawn as a toggle (§5), with or without JCEF. |
 | `session.notices` | `{}` | Shown as a line of the transcript (§4), with or without JCEF. |
-| `session.compaction` | Omitted | Compaction updates are not shown yet (§4). |
+| `session.compaction` | `{}` | Compactions are shown as an entry of the transcript (§4), with or without JCEF. |
 
 An omitted capability means "unsupported" to the agent, which then must not use the feature.
 
@@ -99,7 +99,7 @@ An omitted capability means "unsupported" to the agent, which then must not use 
 | `session_info_update` | Yes | Title / update time. |
 | `usage_update` | Yes | Context usage and cost. |
 | `notice` | Yes | One line of plain text, colored by `severity`; live only, never stored in the snapshot. |
-| `compaction_update` / `compaction_summary_chunk` | No | Not advertised; ignored if received. |
+| `compaction_update` / `compaction_summary_chunk` | Yes | One entry per `compactionId`, kept where it was first reported and patched there; the summary is folded away. Stored in the snapshot. One still `in_progress` when the turn ends is marked `cancelled`. |
 
 Any variant the plugin does not know is ignored and logged, never a decoding failure.
 
@@ -149,7 +149,7 @@ that only clarified wording are left out.
 | v1.7.0 | Terminal authentication | By design |
 | v1.8.0 | Tool call `name` | Yes |
 | v1.11.0 | Session notices | Yes |
-| v1.11.0 | Session compaction | No |
+| v1.11.0 | Session compaction | Yes |
 
 ---
 

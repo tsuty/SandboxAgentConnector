@@ -31,6 +31,7 @@ import com.tsuty.sandboxagent.service.SandboxAgentEventListener
 import com.tsuty.sandboxagent.service.SandboxAgentService
 import com.tsuty.sandboxagent.service.SessionState
 import com.tsuty.sandboxagent.session.AgentMessageEntry
+import com.tsuty.sandboxagent.session.CompactionEntry
 import com.tsuty.sandboxagent.session.NoticeEntry
 import com.tsuty.sandboxagent.session.PlanSnapshotEntry
 import com.tsuty.sandboxagent.session.SessionSnapshot
@@ -457,6 +458,8 @@ class SandboxAgentMainPanel(
             }
             is SandboxAgentEvent.UsageUpdated -> updateTokenUsageButton(event)
             is SandboxAgentEvent.NoticeReceived -> chatLog.appendNotice(event.severity, event.title, event.description)
+            is SandboxAgentEvent.CompactionUpdated -> chatLog.updateCompaction(event.update)
+            is SandboxAgentEvent.CompactionSummaryAppended -> chatLog.appendCompactionSummary(event.compactionId, event.text)
             is SandboxAgentEvent.Error -> chatLog.appendError(event.message)
             // The list itself is read from the service when the dropdown is opened.
             is SandboxAgentEvent.SessionsListed -> Unit
@@ -518,6 +521,7 @@ class SandboxAgentMainPanel(
                 // `moveUp` icon anchored so the transcript keeps showing separate turns instead of
                 // one continuous block once it is saved and restored again.
                 is TurnEndEntry -> chatLog.markTurnEnd()
+                is CompactionEntry -> chatLog.showCompaction(entry)
             }
         }
     }

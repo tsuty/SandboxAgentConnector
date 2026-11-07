@@ -365,6 +365,42 @@
         });
     }
 
+    /**
+     * A compaction of the context: a quiet line naming its state, with the summary folded away
+     * behind it. An update redraws the entry where it stands, keeping the summary open or closed.
+     */
+    function applyCompaction(event) {
+        var entry = entries[event.id];
+        var expanded = false;
+        if (!entry) {
+            entry = {node: el('div', 'entry compaction')};
+            entries[event.id] = entry;
+            append(entry.node);
+        } else {
+            var open = entry.node.querySelector('.anchor');
+            expanded = !!open && open.getAttribute('aria-expanded') === 'true';
+            entry.node.textContent = '';
+        }
+        entry.node.classList.toggle('compaction--failed', !!event.failed);
+        if (event.summaryHtml) {
+            var body = el('div', 'compaction-summary markdown quiet');
+            fillMarkdown(body, event.summaryHtml, null, event.id);
+            body.hidden = !expanded;
+            var button = anchor(event.headline, body);
+            button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            if (event.running) button.appendChild(el('span', 'spinner'));
+            entry.node.appendChild(button);
+            entry.node.appendChild(body);
+            entry.body = body;
+        } else {
+            var line = el('div', 'compaction-line');
+            if (event.running) line.appendChild(el('span', 'spinner'));
+            line.appendChild(el('span', 'anchor-text', event.headline));
+            entry.node.appendChild(line);
+            entry.body = line;
+        }
+    }
+
     /** The action closing a turn: it jumps back to the block the turn started with. */
     function markTurnEnd(event) {
         var entry = entries[event.id];
@@ -1159,6 +1195,7 @@
         blockHtml: replaceBlockHtml,
         attachments: addAttachments,
         images: addImages,
+        compaction: applyCompaction,
         group: applyGroup,
         toolCall: applyToolCall,
         permission: addPermission,

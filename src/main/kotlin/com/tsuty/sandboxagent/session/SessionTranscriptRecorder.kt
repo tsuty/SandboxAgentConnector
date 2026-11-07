@@ -27,6 +27,9 @@ class SessionTranscriptRecorder {
     /** Index of the [ToolCallEntry] of each tool call, so an update refreshes it in place. */
     private val toolCallIndexes = LinkedHashMap<String, Int>()
 
+    /** Index of the [CompactionEntry] of each compaction, likewise. */
+    private val compactionIndexes = LinkedHashMap<String, Int>()
+
     private var planIndex: Int? = null
 
     /**
@@ -50,6 +53,7 @@ class SessionTranscriptRecorder {
         agentMessageId = null
         thought.setLength(0)
         toolCallIndexes.clear()
+        compactionIndexes.clear()
         planIndex = null
         pendingAttachments.clear()
     }
@@ -63,6 +67,7 @@ class SessionTranscriptRecorder {
             when (entry) {
                 is ToolCallEntry -> toolCallIndexes[entry.toolCall.toolCallId] = entries.lastIndex
                 is PlanSnapshotEntry -> planIndex = entries.lastIndex
+                is CompactionEntry -> compactionIndexes[entry.compactionId] = entries.lastIndex
                 else -> Unit
             }
         }
@@ -86,6 +91,12 @@ class SessionTranscriptRecorder {
             is SandboxAgentEvent.ToolCallStarted -> upsertToolCall(event.toolCall)
             is SandboxAgentEvent.ToolCallUpdated -> upsertToolCall(event.toolCall)
             is SandboxAgentEvent.PlanUpdated -> upsertPlan(event)
+            is SandboxAgentEvent.CompactionUpdated -> upsertCompaction(event.update.compactionId, { it.applying(event.update) }) {
+                CompactionEntry.of(event.update)
+            }
+            is SandboxAgentEvent.CompactionSummaryAppended -> upsertCompaction(event.compactionId, { it.appending(event.text) }) {
+                CompactionEntry.opened(event.compactionId).appending(event.text)
+            }
             is SandboxAgentEvent.TurnFinished -> {
                 endAgentMessage()
                 if (thought.isNotBlank()) entries += ThoughtEntry(thought.toString().trim())
@@ -151,6 +162,22 @@ class SessionTranscriptRecorder {
         }
         val previous = (entries[index] as ToolCallEntry).toolCall
         entries[index] = ToolCallEntry(previous.mergeWith(toolCall))
+    }
+
+    /** A compaction stays where it was first reported, and is patched there (see [CompactionEntry]). */
+    private fun upsertCompaction(
+        compactionId: String,
+        change: (CompactionEntry) -> CompactionEntry,
+        create: () -> CompactionEntry,
+    ) {
+        val index = compactionIndexes[compactionId]
+        if (index == null) {
+            endAgentMessage()
+            entries += create()
+            compactionIndexes[compactionId] = entries.lastIndex
+            return
+        }
+        entries[index] = change(entries[index] as CompactionEntry)
     }
 
     private fun upsertPlan(event: SandboxAgentEvent.PlanUpdated) {

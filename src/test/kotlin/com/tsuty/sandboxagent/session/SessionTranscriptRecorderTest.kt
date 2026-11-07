@@ -1,5 +1,8 @@
 package com.tsuty.sandboxagent.session
 
+import com.tsuty.sandboxagent.acp.Patch
+import com.tsuty.sandboxagent.acp.CompactionUpdate
+import com.tsuty.sandboxagent.acp.CompactionStatus
 import com.tsuty.sandboxagent.acp.ToolCallContentBlock
 import com.tsuty.sandboxagent.acp.ImageContentBlock
 import com.tsuty.sandboxagent.acp.PlanEntry
@@ -223,5 +226,28 @@ class SessionTranscriptRecorderTest {
         assertEquals("Here: [image image/png]", assertIs<AgentMessageEntry>(recorder.entries()[0]).text)
         val stored = assertIs<ToolCallEntry>(recorder.entries()[1]).toolCall.content.single()
         assertEquals(ImageContentBlock("", "image/png"), assertIs<ToolCallContentBlock>(stored).content)
+    }
+
+    @Test
+    fun `a compaction keeps the place it was first reported at and is patched there`() {
+        val recorder = SessionTranscriptRecorder()
+
+        recorder.record(SandboxAgentEvent.AgentMessageChunk("Working."))
+        recorder.record(SandboxAgentEvent.CompactionSummaryAppended("cmp_1", "We fixed "))
+        recorder.record(SandboxAgentEvent.AgentMessageChunk("Still working."))
+        recorder.record(SandboxAgentEvent.CompactionSummaryAppended("cmp_1", "the parser."))
+        recorder.record(SandboxAgentEvent.CompactionUpdated(CompactionUpdate("cmp_1", CompactionStatus.COMPLETED)))
+
+        val entries = recorder.entries()
+        assertEquals("Working.", assertIs<AgentMessageEntry>(entries[0]).text)
+        assertEquals(CompactionEntry("cmp_1", "completed", summary = "We fixed the parser."), entries[1])
+        assertEquals("Still working.", assertIs<AgentMessageEntry>(entries[2]).text)
+
+        // A restored snapshot keeps patching the same entry.
+        recorder.restore(SessionSnapshot(sessionId = "s", entries = entries))
+        recorder.record(
+            SandboxAgentEvent.CompactionUpdated(CompactionUpdate("cmp_1", CompactionStatus.COMPLETED, summary = Patch.Clear)),
+        )
+        assertEquals(CompactionEntry("cmp_1", "completed"), recorder.entries()[1])
     }
 }

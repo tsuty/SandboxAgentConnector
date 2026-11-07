@@ -764,7 +764,7 @@ class AcpModelsTest {
     }
 
     @Test
-    fun `the session capabilities advertise boolean config options and notices`() {
+    fun `the session capabilities advertise boolean config options, notices and compactions`() {
         val encoded = AcpJson.encodeToJsonElement(
             ClientCapabilities.serializer(),
             ClientCapabilities(session = ClientSessionCapabilities.SUPPORTED),
@@ -773,8 +773,7 @@ class AcpModelsTest {
         val session = encoded["session"]!!.jsonObject
         assertEquals(JsonObject(emptyMap()), session["configOptions"]!!.jsonObject["boolean"])
         assertEquals(JsonObject(emptyMap()), session["notices"])
-        // Compaction is not supported, so it is left out rather than sent as `null`.
-        assertFalse("compaction" in session)
+        assertEquals(JsonObject(emptyMap()), session["compaction"])
     }
 
     @Test
@@ -837,5 +836,27 @@ class AcpModelsTest {
         // The chip names the file alone: the image itself is never stored.
         assertEquals(PromptAttachment(path = "/workspace/shot.png"), item.toAttachment())
         assertTrue(ImageContentBlock("AAAA", "image/png").promptAttachments.isEmpty())
+    }
+
+    @Test
+    fun `a compaction update tells an omitted field from a cleared one`() {
+        fun decode(json: String) = assertIs<CompactionUpdate>(AcpCodec.decodeSessionUpdate(AcpJson.parseToJsonElement(json)))
+
+        val opened = decode("""{"sessionUpdate":"compaction_update","compactionId":"c1","status":"in_progress"}""")
+        assertEquals(CompactionUpdate("c1", "in_progress", Patch.Keep, Patch.Keep), opened)
+        val done = decode(
+            """{"sessionUpdate":"compaction_update","compactionId":"c1","status":"completed",""" +
+                """"summary":[{"type":"text","text":"Fixed "},{"type":"text","text":"it."}],"error":null}""",
+        )
+        assertEquals(CompactionUpdate("c1", "completed", Patch.Set("Fixed it."), Patch.Clear), done)
+        assertEquals(Patch.Clear, decode("""{"sessionUpdate":"compaction_update","compactionId":"c1","status":"completed","summary":[]}""").summary)
+        // Without an id there is nothing to patch: the update is unknown, not a failure.
+        assertIs<UnknownSessionUpdate>(
+            AcpCodec.decodeSessionUpdate(AcpJson.parseToJsonElement("""{"sessionUpdate":"compaction_update","status":"completed"}""")),
+        )
+        val chunk = AcpCodec.decodeSessionUpdate(
+            AcpJson.parseToJsonElement("""{"sessionUpdate":"compaction_summary_chunk","compactionId":"c1","content":{"type":"text","text":"x"}}"""),
+        )
+        assertEquals(CompactionSummaryChunk("c1", TextContentBlock("x")), chunk)
     }
 }

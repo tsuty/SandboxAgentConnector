@@ -4,7 +4,10 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.project.getProjectCacheFileName
+import com.tsuty.sandboxagent.acp.CompactionStatus
+import com.tsuty.sandboxagent.acp.CompactionUpdate
 import com.tsuty.sandboxagent.acp.PlanEntry
+import com.tsuty.sandboxagent.acp.applyTo
 import com.tsuty.sandboxagent.acp.PromptAttachment
 import com.tsuty.sandboxagent.acp.ToolCall
 import com.tsuty.sandboxagent.acp.promptTextWithoutAttachments
@@ -81,6 +84,41 @@ data class NoticeEntry(val text: String, val error: Boolean = false) : Transcrip
 @Serializable
 @SerialName("turn_end")
 data object TurnEndEntry : TranscriptEntry
+
+/**
+ * A compaction of the context (`compaction_update`), in its latest state: it is part of the
+ * history — the agent replays it — unlike a notice. Added without a schema version bump, like
+ * the optional fields of [SessionSnapshot]: a version that does not know the entry cannot read
+ * such a snapshot at all, which is accepted, since compacting is what the backups are for.
+ */
+@Serializable
+@SerialName("compaction")
+data class CompactionEntry(
+    val compactionId: String,
+    val status: String,
+    val summary: String? = null,
+    val error: String? = null,
+) : TranscriptEntry {
+    /** This compaction with [update] applied; the patch semantics are ACP's. */
+    fun applying(update: CompactionUpdate): CompactionEntry = copy(
+        status = update.status,
+        summary = update.summary.applyTo(summary),
+        error = update.error.applyTo(error),
+    )
+
+    fun appending(text: String): CompactionEntry = copy(summary = summary.orEmpty() + text)
+
+    val isFinished: Boolean get() = status != CompactionStatus.IN_PROGRESS
+
+    companion object {
+        /** A compaction first seen through [update]. */
+        fun of(update: CompactionUpdate): CompactionEntry =
+            CompactionEntry(update.compactionId, update.status).applying(update)
+
+        /** A compaction first seen through a summary chunk, which opens it in progress. */
+        fun opened(compactionId: String): CompactionEntry = CompactionEntry(compactionId, CompactionStatus.IN_PROGRESS)
+    }
+}
 
 /**
  * Locally stored display state of one session.

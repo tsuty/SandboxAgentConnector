@@ -16,6 +16,7 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.ui.jcef.JBCefApp
+import com.tsuty.sandboxagent.acp.CompactionUpdate
 import com.tsuty.sandboxagent.acp.ElicitationResult
 import com.tsuty.sandboxagent.acp.ImageContentBlock
 import com.tsuty.sandboxagent.acp.NoticeSeverity
@@ -29,6 +30,7 @@ import com.tsuty.sandboxagent.acp.plainText
 import com.tsuty.sandboxagent.service.ElicitationRequest
 import com.tsuty.sandboxagent.service.PendingAnswer
 import com.tsuty.sandboxagent.service.PermissionRequest
+import com.tsuty.sandboxagent.session.CompactionEntry
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsBridge
 import com.tsuty.sandboxagent.settings.AgentEntry
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
@@ -110,6 +112,9 @@ class TranscriptPanel(
 
     /** Markdown source of the blocks that offer a `Copy`, which is what it puts on the clipboard. */
     private val sources = mutableMapOf<String, String>()
+
+    /** The latest state of each compaction on screen; its `compactionId` is also its entry id. */
+    private val compactions = mutableMapOf<String, CompactionEntry>()
 
     /** Group collecting the tool calls of the current run; every other entry closes it. */
     private var group: OpenGroup? = null
@@ -258,6 +263,31 @@ class TranscriptPanel(
         val id = streamingId ?: startStreaming()
         view.post(ImagesEvent(id, listOf(src), alt = image.plainText))
     }
+
+    /**
+     * Draws a compaction of the context, or redraws it in place: it stays where it was first
+     * reported, as ACP asks. A restored snapshot draws its final state the same way.
+     */
+    fun showCompaction(entry: CompactionEntry) {
+        if (entry.compactionId !in compactions) {
+            endStreaming()
+            closeGroup()
+        }
+        compactions[entry.compactionId] = entry
+        view.post(TranscriptCompaction.event(entryIdOf(entry.compactionId), entry))
+    }
+
+    fun updateCompaction(update: CompactionUpdate) {
+        showCompaction(compactions[update.compactionId]?.applying(update) ?: CompactionEntry.of(update))
+    }
+
+    fun appendCompactionSummary(compactionId: String, text: String) {
+        val current = compactions[compactionId] ?: CompactionEntry.opened(compactionId)
+        showCompaction(current.appending(text))
+    }
+
+    /** Entry id of a compaction: prefixed, so an agent's id cannot collide with a block of ours. */
+    private fun entryIdOf(compactionId: String): String = "compaction:$compactionId"
 
     /**
      * Appends a whole agent answer at once, which is how a restored snapshot is drawn: the text is
@@ -436,6 +466,7 @@ class TranscriptPanel(
         toolCallGroups.clear()
         toolCalls.clear()
         permissions.clear()
+        compactions.clear()
         view.post(ResetEvent())
     }
 

@@ -134,6 +134,21 @@ data class AttachmentsEvent(val id: String, val chips: List<TranscriptChip>) : T
 data class ImagesEvent(val id: String, val sources: List<String>, val alt: String = "") : TranscriptEvent
 
 /**
+ * Draws a compaction of the context, or redraws the entry of [id] in place: a compaction keeps
+ * the place it was first reported at. [headline] names it and its state; the summary, when there
+ * is one, is folded away behind an anchor.
+ */
+@Serializable
+@SerialName("compaction")
+data class CompactionEvent(
+    val id: String,
+    val headline: String,
+    val running: Boolean = false,
+    val failed: Boolean = false,
+    val summaryHtml: String = "",
+) : TranscriptEvent
+
+/**
  * Opens or closes the foldable group collecting the tool calls of one run.
  *
  * The elapsed time is counted by the document itself: [timed] tells it whether this run is
