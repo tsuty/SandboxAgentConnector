@@ -6,10 +6,10 @@ import com.intellij.notification.NotificationType
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.project.Project
+import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTabsManager
 import com.tsuty.sandboxagent.acp.SandboxCommand
 import com.tsuty.sandboxagent.settings.SandboxAgentSettingsState
 import com.tsuty.sandboxagent.settings.SandboxTypes
-import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
 /**
  * Logs into the running sandbox in a terminal tab of the IDE (SPEC §3.3).
@@ -49,13 +49,13 @@ object SandboxTerminal {
         // Catches a `Throwable`: a Terminal plugin that changed its API surface must not take the
         // tool window down with it, and the command is in the log to run by hand.
         try {
-            val widget = TerminalToolWindowManager.getInstance(project).createShellWidget(
-                project.basePath,
-                settings.sandboxName.ifBlank { project.name },
-                true,
-                true,
-            )
-            widget.sendCommandToExecute(command)
+            val tab = TerminalToolWindowTabsManager.getInstance(project).createTabBuilder()
+                .workingDirectory(project.basePath)
+                .tabName(settings.sandboxName.ifBlank { project.name })
+                .requestFocus(true)
+                .deferSessionStartUntilUiShown(true)
+                .createTab()
+            tab.view.createSendTextBuilder().shouldExecute().send(command)
         } catch (e: Throwable) {
             log.warn("Cannot open a sandbox terminal", e)
             report(project, "Cannot open a terminal: ${e.message ?: e.javaClass.simpleName}")
