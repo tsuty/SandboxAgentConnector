@@ -1,7 +1,9 @@
 package com.tsuty.sandboxagent.ui.transcript
 
+import com.tsuty.sandboxagent.acp.ImageContentBlock
 import com.tsuty.sandboxagent.acp.PermissionOption
 import com.tsuty.sandboxagent.acp.ToolCall
+import com.tsuty.sandboxagent.acp.ToolCallContentBlock
 import com.tsuty.sandboxagent.acp.ToolCallStatus
 import com.tsuty.sandboxagent.acp.ToolKind
 import com.tsuty.sandboxagent.ui.ToolCallPresentation
@@ -29,7 +31,7 @@ object TranscriptToolCall {
             statusLabel = statusLabel(toolCall),
             failed = toolCall.status == ToolCallStatus.FAILED,
             flat = flat(toolCall),
-            bodyHtml = if (switchMode == null && ask == null) TranscriptHtml.render(ToolCallPresentation.expandedBody(toolCall)) else "",
+            bodyHtml = if (switchMode == null && ask == null) bodyHtml(toolCall) else "",
             switchMode = switchMode?.let {
                 TranscriptSwitchMode(
                     headline = it.headline,
@@ -62,6 +64,18 @@ object TranscriptToolCall {
                 )
             },
         )
+    }
+
+    /**
+     * The details of the card, then the images the call reported. Those are built here rather than
+     * written as Markdown: the `<img>` is ours, so it is added after the sanitizer, which only sees
+     * what the agent wrote.
+     */
+    private fun bodyHtml(toolCall: ToolCall): String {
+        val images = toolCall.content.mapNotNull { item ->
+            ((item as? ToolCallContentBlock)?.content as? ImageContentBlock)?.let(TranscriptImages::html)
+        }
+        return TranscriptHtml.render(ToolCallPresentation.expandedBody(toolCall)) + images.joinToString("")
     }
 
     /**

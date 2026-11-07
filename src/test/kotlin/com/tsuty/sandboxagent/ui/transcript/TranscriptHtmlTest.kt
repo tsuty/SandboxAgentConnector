@@ -165,4 +165,16 @@ class TranscriptHtmlTest {
         assertEquals(TranscriptHtml.renderQuestion("a\n\nb"), TranscriptHtml.renderQuestionInline("a\n\nb"))
         assertEquals("", TranscriptHtml.renderQuestionInline(""))
     }
+
+    @Test
+    fun `a data uri is kept for a raster image only and never for a link`() {
+        val html = TranscriptHtml.sanitize(
+            """<img src="data:image/png;base64,AAAA"><img src="data:image/svg+xml;base64,AAAA">""" +
+                """<a href="data:text/html,x">link</a>""",
+        )
+
+        assertTrue(html.contains("""src="data:image/png;base64,AAAA""""), html)
+        assertFalse(html.contains("svg"), html)
+        assertFalse(html.contains("href"), html)
+    }
 }

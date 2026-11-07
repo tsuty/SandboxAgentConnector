@@ -1,5 +1,7 @@
 package com.tsuty.sandboxagent.ui.transcript
 
+import org.junit.jupiter.api.Assertions.assertFalse
+import com.tsuty.sandboxagent.acp.ImageContentBlock
 import com.tsuty.sandboxagent.acp.PermissionOption
 import com.tsuty.sandboxagent.acp.PermissionOptionKind
 import com.tsuty.sandboxagent.acp.TextContentBlock
@@ -157,5 +159,31 @@ class TranscriptToolCallTest {
         assertEquals("Switch mode: Plan ready  →  code", event.headline)
         assertTrue(event.expanded)
         assertTrue(event.bodyHtml.contains("the plan"), event.bodyHtml)
+    }
+
+    @Test
+    fun `an image a call reported is drawn in its body instead of its placeholder`() {
+        val png = java.util.Base64.getEncoder().encodeToString(
+            byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0),
+        )
+        val call = ToolCall(
+            toolCallId = "toolu_shot",
+            title = "Screenshot",
+            kind = ToolKind.OTHER,
+            status = ToolCallStatus.COMPLETED,
+            content = listOf(ToolCallContentBlock(ImageContentBlock(png, "image/png"))),
+        )
+
+        val body = TranscriptToolCall.event(call, groupId = null).bodyHtml
+
+        assertTrue(body.contains("""<img class="transcript-image" src="data:image/png;base64,$png""""), body)
+        assertFalse(body.contains("No details reported"), body)
+        // Without its data (a restored card), the image is the placeholder it always was.
+        val restored = TranscriptToolCall.event(
+            call.copy(content = listOf(ToolCallContentBlock(ImageContentBlock("", "image/png")))),
+            groupId = null,
+        ).bodyHtml
+        assertTrue(restored.contains("[image image/png]"), restored)
+        assertFalse(restored.contains("<img"), restored)
     }
 }

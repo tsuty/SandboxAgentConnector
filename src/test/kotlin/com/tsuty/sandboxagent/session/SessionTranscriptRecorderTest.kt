@@ -1,5 +1,7 @@
 package com.tsuty.sandboxagent.session
 
+import com.tsuty.sandboxagent.acp.ToolCallContentBlock
+import com.tsuty.sandboxagent.acp.ImageContentBlock
 import com.tsuty.sandboxagent.acp.PlanEntry
 import com.tsuty.sandboxagent.acp.PromptAttachment
 import com.tsuty.sandboxagent.acp.StopReason
@@ -205,5 +207,21 @@ class SessionTranscriptRecorderTest {
         recorder.clear()
 
         assertTrue(recorder.entries().isEmpty())
+    }
+
+    @Test
+    fun `images are stored as their placeholder, never with their data`() {
+        val recorder = SessionTranscriptRecorder()
+        val image = ImageContentBlock("iVBORw0KGgo=", "image/png")
+
+        recorder.record(SandboxAgentEvent.AgentMessageChunk("Here: ", "m1"))
+        recorder.record(SandboxAgentEvent.AgentImage(image, "m1"))
+        recorder.record(
+            SandboxAgentEvent.ToolCallStarted(ToolCall(toolCallId = "t1", content = listOf(ToolCallContentBlock(image)))),
+        )
+
+        assertEquals("Here: [image image/png]", assertIs<AgentMessageEntry>(recorder.entries()[0]).text)
+        val stored = assertIs<ToolCallEntry>(recorder.entries()[1]).toolCall.content.single()
+        assertEquals(ImageContentBlock("", "image/png"), assertIs<ToolCallContentBlock>(stored).content)
     }
 }

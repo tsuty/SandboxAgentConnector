@@ -112,10 +112,12 @@ Any variant the plugin does not know is ignored and logged, never a decoding fai
 | Prompt: `text` | Yes | |
 | Prompt: `resource` (embedded) | Yes | Attached files and selections, when the agent declares `promptCapabilities.embeddedContext`. Otherwise they are inlined into a `text` block as `<context ref="file://…">…</context>`. |
 | Prompt: `resource_link` | No | |
-| Prompt: `image` / `audio` | No | |
+| Prompt: `image` | No | Planned: attached image files, when `promptCapabilities.image` is declared, with a thumbnail chip. Until then a binary file cannot be attached at all. |
+| Prompt: `audio` | No | |
 | Shown: `text` | Yes | Markdown, sanitized. |
 | Shown: `resource_link` / `resource` | Partial | As text: the link's text, title, name or URI; the resource's text. |
-| Shown: `image` / `audio` | Partial | Shown as a `[image <mime>]` / `[audio <mime>]` placeholder. |
+| Shown: `image` | Yes | In agent messages and tool call results: PNG, JPEG, GIF and WebP (told by their bytes, not by `mimeType`) up to about 5 MiB. Anything else, and every image of a restored snapshot (images are not stored), is a `[image <mime>]` placeholder. |
+| Shown: `audio` | Partial | Shown as an `[audio <mime>]` placeholder. |
 | Tool call content: `content` / `diff` | Yes | Diffs open in the IDE diff viewer. |
 | Tool call content: `terminal` | By design | Only meaningful with the `terminal` client capability. |
 | Config option type `select` | Yes | Grouped options are flattened. `mode`, `model`, `thought_level` categories are recognized. |

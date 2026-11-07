@@ -24,6 +24,7 @@ import com.tsuty.sandboxagent.acp.ConfigOptionUpdate
 import com.tsuty.sandboxagent.acp.ContentBlock
 import com.tsuty.sandboxagent.acp.CurrentModeUpdate
 import com.tsuty.sandboxagent.acp.CurrentModelUpdate
+import com.tsuty.sandboxagent.acp.ImageContentBlock
 import com.tsuty.sandboxagent.acp.InitializeParams
 import com.tsuty.sandboxagent.acp.ElicitationCapabilities
 import com.tsuty.sandboxagent.acp.ElicitationForm
@@ -216,6 +217,12 @@ sealed interface SandboxAgentEvent {
         val cost: UsageCost?,
     ) : SandboxAgentEvent
     data class AgentMessageChunk(val text: String, val messageId: String? = null) : SandboxAgentEvent
+
+    /**
+     * An image of the agent answer. Drawn live only: the stored transcript keeps the placeholder
+     * text it always had (see [SessionTranscriptRecorder]).
+     */
+    data class AgentImage(val image: ImageContentBlock, val messageId: String? = null) : SandboxAgentEvent
     data class AgentThoughtChunk(val text: String) : SandboxAgentEvent
     data class ToolCallStarted(val toolCall: ToolCall) : SandboxAgentEvent
     data class ToolCallUpdated(val toolCall: ToolCall) : SandboxAgentEvent
@@ -1790,8 +1797,10 @@ class SandboxAgentService(
         }
         when (val update = notification.update) {
             is SessionInfoUpdate -> handleSessionInfo(updatedSession, update)
-            is AgentMessageChunkUpdate ->
-                publish(SandboxAgentEvent.AgentMessageChunk(update.content.plainText, update.messageId))
+            is AgentMessageChunkUpdate -> when (val content = update.content) {
+                is ImageContentBlock -> publish(SandboxAgentEvent.AgentImage(content, update.messageId))
+                else -> publish(SandboxAgentEvent.AgentMessageChunk(content.plainText, update.messageId))
+            }
             is ThoughtChunkUpdate -> publish(SandboxAgentEvent.AgentThoughtChunk(update.content.plainText))
             is UserMessageChunkUpdate -> publishUserMessageChunk(update.content)
             is ToolCallUpdateEvent -> {

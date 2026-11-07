@@ -103,9 +103,14 @@ class ContextChipsPanel(private val project: Project) :
 
     override fun getBackground(): Color = SandboxAgentColors.PANEL_BACKGROUND
 
-    /** Attaches a virtual file or directory within the project. Safe to call on any VirtualFile. */
+    /**
+     * Attaches a virtual file or directory within the project. Safe to call on any VirtualFile.
+     * A binary file (an image, an archive, ...) is refused: an attachment is sent as text, and
+     * its bytes read as text would only reach the agent garbled.
+     */
     fun attachVirtualFile(file: VirtualFile): Boolean {
         if (!file.isValid || !AttachFileUtils.isInsideProject(file, project)) return false
+        if (!file.isDirectory && file.fileType.isBinary) return false
 
         if (file.isDirectory) {
             val item = AcpContextItem(path = file.path, content = "")

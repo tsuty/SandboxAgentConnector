@@ -130,4 +130,20 @@ class AcpTrafficLoggerTest {
 
         assertFalse(dir.exists())
     }
+
+    @Test
+    fun `the data of an image is logged as its length`() {
+        val data = "A".repeat(8_000)
+        val line = """{"jsonrpc":"2.0","method":"session/update","params":{"update":""" +
+            """{"sessionUpdate":"agent_message_chunk","content":{"type":"image","mimeType":"image/png","data":"$data"}}}}"""
+
+        val logged = AcpTrafficLogger.withoutMediaData(line)
+
+        assertTrue("<8000 base64 chars omitted>" in logged, logged)
+        assertTrue("image/png" in logged, logged)
+        // A text block keeps its `data`-free line as it was, and a short line is not even parsed.
+        val text = """{"type":"text","text":"${"x".repeat(8_000)}","data":"keep"}"""
+        assertEquals(text, AcpTrafficLogger.withoutMediaData(text))
+        assertEquals("not json", AcpTrafficLogger.withoutMediaData("not json"))
+    }
 }

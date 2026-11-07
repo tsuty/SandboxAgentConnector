@@ -345,6 +345,26 @@
         });
     }
 
+    /** Images of an agent answer, in a row of their own so a new body leaves them in place. */
+    function addImages(event) {
+        var entry = entries[event.id];
+        if (!entry) return;
+        var row = entry.node.querySelector('.images');
+        if (!row) {
+            row = el('div', 'images');
+            entry.node.appendChild(row);
+        }
+        (event.sources || []).forEach(function (src) {
+            // Only `data:` URIs of a raster type reach this point (TranscriptImages); the CSP
+            // would refuse anything loaded from elsewhere.
+            if (src.indexOf('data:image/') !== 0) return;
+            var image = el('img', 'transcript-image');
+            image.alt = event.alt || '';
+            image.src = src;
+            row.appendChild(image);
+        });
+    }
+
     /** The action closing a turn: it jumps back to the block the turn started with. */
     function markTurnEnd(event) {
         var entry = entries[event.id];
@@ -1138,6 +1158,7 @@
         stream: appendStream,
         blockHtml: replaceBlockHtml,
         attachments: addAttachments,
+        images: addImages,
         group: applyGroup,
         toolCall: applyToolCall,
         permission: addPermission,

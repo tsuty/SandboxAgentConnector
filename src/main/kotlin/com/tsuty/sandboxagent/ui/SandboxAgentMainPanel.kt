@@ -334,7 +334,11 @@ class SandboxAgentMainPanel(
     private fun actionBar(): JPanel {
         lateinit var attachFile: FlatIconButton
         attachFile = FlatIconButton(AllIcons.Actions.AddFile, "Attach File") {
-            AttachFilePopup.show(attachFile, project) { file -> chips.attachVirtualFile(file) }
+            AttachFilePopup.show(attachFile, project) { file ->
+                if (!chips.attachVirtualFile(file) && !file.isDirectory && file.fileType.isBinary) {
+                    chatLog.appendSystemMessage("${file.name} is a binary file, which cannot be attached")
+                }
+            }
         }
         val attachSelection = FlatIconButton(AllIcons.Actions.AddList, "Attach Selection") {
             if (!chips.attachSelection()) chatLog.appendSystemMessage("Nothing is selected in the editor")
@@ -424,6 +428,10 @@ class SandboxAgentMainPanel(
             is SandboxAgentEvent.AgentMessageChunk -> {
                 thinking.endThought()
                 chatLog.appendAgentChunk(event.text)
+            }
+            is SandboxAgentEvent.AgentImage -> {
+                thinking.endThought()
+                chatLog.appendAgentImage(event.image)
             }
             is SandboxAgentEvent.AgentThoughtChunk -> thinking.append(event.text)
             is SandboxAgentEvent.ToolCallStarted -> {

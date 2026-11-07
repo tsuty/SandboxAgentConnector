@@ -126,6 +126,7 @@ transcript instead of doubling it.
 | `stream` | `id`, `text` | append raw text to a streaming block, below its latest Markdown rendering if any |
 | `blockHtml` | `id`, `html`, `choices` | replace the body of a block with its rendered Markdown |
 | `attachments` | `id`, `chips` | add attachment chips to a `USER` block (a replay reports them after the prompt) |
+| `images` | `id`, `sources`, `alt` | add images below an agent block, outside its body (a `blockHtml` leaves them); `sources` are `data:` URIs of a raster type |
 | `group` | `id`, `timed`, `closed`, `elapsedMs` | open / close a tool call group; the label (`Working… 12s`, `Worked 12s`) is rendered and ticked by the web side |
 | `toolCall` | see below | add or update a tool call card (upsert by `id`); an ask-the-user call carries `question` (`headline` and the `questions`, each with `header`, `question`, `questionHtml`, `multiSelect` and `options` of `label` / `description` / `preview` and their `labelHtml` / `descriptionHtml` / `previewHtml`) and its folded row unfolds to the questions as they were put instead of the raw input |
 | `permission` | `id`, `toolCallId`, `headline`, `bodyHtml`, `flat`, `options` | inline approval card; `toolCallId` is what the `flat` diff of the card is opened by (`id` names the request, not a tool call) |
@@ -226,8 +227,11 @@ untrusted input, so three independent barriers are used:
    The bundled script and stylesheet are the only ones allowed to run; nothing can be loaded from
    the network.
 2. **Sanitizing in Kotlin** (`TranscriptHtml`): a tag / attribute allow list that drops `script`,
-   `iframe`, `style`, every `on*` handler and `javascript:` URLs. It is a pure function and is
-   unit tested.
+   `iframe`, `style`, every `on*` handler and `javascript:` URLs. A `data:` URI is only kept as
+   the `src` of an `<img>`, and only for PNG, JPEG, GIF or WebP — an SVG is a document of its
+   own. It is a pure function and is unit tested. The images of ACP content blocks never pass
+   through Markdown: `TranscriptImages` builds their `data:` URI after checking the payload is
+   Base64 of one of those formats (by its first bytes) and at most about 5 MiB.
 3. **No navigation** (`JcefTranscriptView`): `CefRequestHandler.onBeforeBrowse` cancels every
    navigation that would leave the document and reports it as an action instead, and
    `CefLifeSpanHandler.onBeforePopup` keeps a `target="_blank"` from opening a window of its own.

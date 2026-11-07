@@ -17,6 +17,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.ui.jcef.JBCefApp
 import com.tsuty.sandboxagent.acp.ElicitationResult
+import com.tsuty.sandboxagent.acp.ImageContentBlock
 import com.tsuty.sandboxagent.acp.NoticeSeverity
 import com.tsuty.sandboxagent.acp.PermissionOption
 import com.tsuty.sandboxagent.acp.PlanEntry
@@ -24,6 +25,7 @@ import com.tsuty.sandboxagent.acp.PromptAttachment
 import com.tsuty.sandboxagent.acp.ToolCall
 import com.tsuty.sandboxagent.acp.ToolKind
 import com.tsuty.sandboxagent.acp.key
+import com.tsuty.sandboxagent.acp.plainText
 import com.tsuty.sandboxagent.service.ElicitationRequest
 import com.tsuty.sandboxagent.service.PendingAnswer
 import com.tsuty.sandboxagent.service.PermissionRequest
@@ -245,6 +247,16 @@ class TranscriptPanel(
         streamed.append(text)
         view.post(StreamEvent(id, text))
         if (!streamRenderTimer.isRunning) streamRenderTimer.restart()
+    }
+
+    /**
+     * Adds an image to the agent answer being streamed (a block is opened for it when none is),
+     * or its placeholder when the transcript does not draw it (see [TranscriptImages]).
+     */
+    fun appendAgentImage(image: ImageContentBlock) {
+        val src = TranscriptImages.dataUri(image) ?: return appendAgentChunk(image.plainText)
+        val id = streamingId ?: startStreaming()
+        view.post(ImagesEvent(id, listOf(src), alt = image.plainText))
     }
 
     /**

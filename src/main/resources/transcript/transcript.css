@@ -265,6 +265,18 @@ pre.stream {
 
 .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 
+/* Images of an answer or a tool call: never wider than the transcript, nor taller than a screen. */
+.images { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+
+.transcript-image {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  height: auto;
+  border: 1px solid var(--ra-border, #d0d0d0);
+  border-radius: 4px;
+}
+
 .chip {
   padding: 1px 6px;
   border: 1px solid var(--ra-border, #c9ccd6);

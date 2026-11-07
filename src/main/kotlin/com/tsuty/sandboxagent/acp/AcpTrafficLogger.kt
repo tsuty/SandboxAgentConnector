@@ -1,6 +1,11 @@
 package com.tsuty.sandboxagent.acp
 
 import com.intellij.openapi.diagnostic.Logger
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStreamWriter
@@ -19,6 +24,10 @@ import java.time.format.DateTimeFormatter
  * (`initialize`, ...) are buffered in memory and flushed once the file is opened. A single
  * connection goes through several sessions (new session button, session restore), so every new
  * `sessionId` closes the previous file and opens its own.
+ *
+ * The payload is the raw line, except for the Base64 `data` of `image` / `audio` content blocks,
+ * which is replaced by its length (see [withoutMediaData]): a screenshot would otherwise make up
+ * most of a log, and says nothing a reader of the protocol needs.
  */
 class AcpTrafficLogger(
     private val logDirectory: File,
@@ -43,7 +52,7 @@ class AcpTrafficLogger(
     @Synchronized
     private fun write(direction: String, rawLine: String) {
         if (closed) return
-        val entry = "${TIMESTAMP_FORMAT.format(clock())} $direction $rawLine"
+        val entry = "${TIMESTAMP_FORMAT.format(clock())} $direction ${withoutMediaData(rawLine)}"
         val currentWriter = writer
         if (currentWriter == null) {
             pending += entry
@@ -103,6 +112,41 @@ class AcpTrafficLogger(
         private val ILLEGAL_FILENAME_CHARS = Regex("[^A-Za-z0-9_.-]")
         private val LOG_FILE_NAME = Regex("^\\d{8}_\\d{6}_.*\\.log$")
         private const val MILLIS_PER_DAY = 24L * 60 * 60 * 1000
+
+        /** Lines shorter than this carry no media worth shortening, and are not parsed at all. */
+        private const val MEDIA_LINE_THRESHOLD = 4096
+
+        private val MEDIA_TYPES = setOf("image", "audio")
+
+        /**
+         * [rawLine] with the `data` of every `image` / `audio` content block replaced by
+         * `<N base64 chars omitted>`; the line itself when it has none, or is not JSON.
+         */
+        fun withoutMediaData(rawLine: String): String {
+            if (rawLine.length < MEDIA_LINE_THRESHOLD || "\"data\"" !in rawLine) return rawLine
+            val parsed = runCatching { AcpJson.parseToJsonElement(rawLine) }.getOrNull() ?: return rawLine
+            var changed = false
+            fun shorten(element: JsonElement): JsonElement = when (element) {
+                is JsonArray -> JsonArray(element.map(::shorten))
+                is JsonObject -> {
+                    val type = (element["type"] as? JsonPrimitive)?.contentOrNull
+                    val data = element["data"] as? JsonPrimitive
+                    JsonObject(
+                        element.mapValues { (key, value) ->
+                            if (key == "data" && type in MEDIA_TYPES && data != null && data.isString) {
+                                changed = true
+                                JsonPrimitive("<${data.content.length} base64 chars omitted>")
+                            } else {
+                                shorten(value)
+                            }
+                        },
+                    )
+                }
+                else -> element
+            }
+            val shortened = shorten(parsed)
+            return if (changed) shortened.toString() else rawLine
+        }
 
         /**
          * Deletes the log files of [directory] last written more than [days] days ago. Only the

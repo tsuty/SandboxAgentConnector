@@ -125,6 +125,15 @@ data class BlockHtmlEvent(
 data class AttachmentsEvent(val id: String, val chips: List<TranscriptChip>) : TranscriptEvent
 
 /**
+ * Adds images below a block of the agent answer, apart from its Markdown body: the body is
+ * replaced as the answer streams on, the images stay. [sources] are `data:` URIs of a raster
+ * type only (see [TranscriptImages]).
+ */
+@Serializable
+@SerialName("images")
+data class ImagesEvent(val id: String, val sources: List<String>, val alt: String = "") : TranscriptEvent
+
+/**
  * Opens or closes the foldable group collecting the tool calls of one run.
  *
  * The elapsed time is counted by the document itself: [timed] tells it whether this run is

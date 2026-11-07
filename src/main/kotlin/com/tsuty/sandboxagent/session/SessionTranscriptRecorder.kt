@@ -1,8 +1,11 @@
 package com.tsuty.sandboxagent.session
 
+import com.tsuty.sandboxagent.acp.ImageContentBlock
 import com.tsuty.sandboxagent.acp.PromptAttachment
 import com.tsuty.sandboxagent.acp.StopReason
 import com.tsuty.sandboxagent.acp.ToolCall
+import com.tsuty.sandboxagent.acp.ToolCallContentBlock
+import com.tsuty.sandboxagent.acp.plainText
 import com.tsuty.sandboxagent.service.SandboxAgentEvent
 
 /**
@@ -75,6 +78,10 @@ class SessionTranscriptRecorder {
             }
             is SandboxAgentEvent.UserPromptAttachments -> attachToPrompt(event.attachments)
             is SandboxAgentEvent.AgentMessageChunk -> appendAgentChunk(event)
+            // Images are not stored: the placeholder takes their place, as it did before they
+            // were drawn.
+            is SandboxAgentEvent.AgentImage ->
+                appendAgentChunk(SandboxAgentEvent.AgentMessageChunk(event.image.plainText, event.messageId))
             is SandboxAgentEvent.AgentThoughtChunk -> thought.append(event.text)
             is SandboxAgentEvent.ToolCallStarted -> upsertToolCall(event.toolCall)
             is SandboxAgentEvent.ToolCallUpdated -> upsertToolCall(event.toolCall)
@@ -133,8 +140,9 @@ class SessionTranscriptRecorder {
         return byKey.values.toList()
     }
 
-    private fun upsertToolCall(toolCall: ToolCall) {
+    private fun upsertToolCall(reported: ToolCall) {
         endAgentMessage()
+        val toolCall = reported.withoutImageData()
         val index = toolCallIndexes[toolCall.toolCallId]
         if (index == null) {
             entries += ToolCallEntry(toolCall)
@@ -164,6 +172,20 @@ class SessionTranscriptRecorder {
         if (event.messageId != null && event.messageId != agentMessageId) endAgentMessage()
         if (event.messageId != null) agentMessageId = event.messageId
         agentText.append(event.text)
+    }
+
+    /**
+     * Images are not stored (see [SandboxAgentEvent.AgentImage]): the block stays, so a restored
+     * card still names the image it showed, but its data goes.
+     */
+    private fun ToolCall.withoutImageData(): ToolCall {
+        if (content.none { (it as? ToolCallContentBlock)?.content is ImageContentBlock }) return this
+        return copy(
+            content = content.map { item ->
+                val image = (item as? ToolCallContentBlock)?.content as? ImageContentBlock
+                if (image == null) item else ToolCallContentBlock(image.copy(data = ""))
+            },
+        )
     }
 
     /** Closes the streaming agent message so the next chunk starts a new block. */

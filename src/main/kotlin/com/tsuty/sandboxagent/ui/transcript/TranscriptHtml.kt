@@ -178,8 +178,10 @@ object TranscriptHtml {
         if (name.startsWith("on")) return false
         if (name == "style") return false
         return when (name) {
-            "href" -> tag == "a" && isSafeUrl(value)
-            "src" -> tag == "img" && isSafeUrl(value)
+            // A `data:` URI is an image, never a link, and only one of the raster types the
+            // transcript draws (see [TranscriptImages]): an SVG is a document of its own.
+            "href" -> tag == "a" && isSafeUrl(value) && !isDataUri(value)
+            "src" -> tag == "img" && isSafeUrl(value) && (!isDataUri(value) || TranscriptImages.isRasterDataUri(value.trim()))
             in GLOBAL_ATTRIBUTES -> true
             else -> ALLOWED_ATTRIBUTES[tag]?.contains(name) == true
         }
@@ -187,7 +189,8 @@ object TranscriptHtml {
 
     /**
      * `true` for a URL that only names something outside the document: an absolute `http(s)` /
-     * `mailto` link, a `data:` image, or a fragment of this very page. `javascript:` and every
+     * `mailto` link, a `data:` image (narrowed further by [keepAttribute]), or a fragment of this
+     * very page. `javascript:` and every
      * other scheme are dropped.
      *
      * A URL without a scheme — a relative or an absolute path — is dropped as well, which is the
@@ -204,6 +207,8 @@ object TranscriptHtml {
         val scheme = SCHEME.find(trimmed)?.groupValues?.get(1)?.lowercase() ?: return false
         return scheme in SAFE_SCHEMES
     }
+
+    private fun isDataUri(url: String): Boolean = url.trim().startsWith("data:", ignoreCase = true)
 
     /** Index of the `>` closing the tag started at [open], skipping the quoted attribute values. */
     private fun tagEnd(html: String, open: Int): Int {

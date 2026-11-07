@@ -8,6 +8,7 @@ import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.tsuty.sandboxagent.acp.ImageContentBlock
 import com.tsuty.sandboxagent.acp.ToolCall
 import com.tsuty.sandboxagent.acp.ToolCallContentBlock
 import com.tsuty.sandboxagent.acp.ToolCallDiff
@@ -16,6 +17,7 @@ import com.tsuty.sandboxagent.acp.ToolCallTerminal
 import com.tsuty.sandboxagent.acp.ToolKind
 import com.tsuty.sandboxagent.acp.UnknownToolCallContent
 import com.tsuty.sandboxagent.acp.plainText
+import com.tsuty.sandboxagent.ui.transcript.TranscriptImages
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -130,9 +132,14 @@ object ToolCallPresentation {
         var reported = toolCall.diffs.isNotEmpty()
         toolCall.content.forEach { content ->
             when (content) {
-                is ToolCallContentBlock -> content.content.plainText.takeIf { it.isNotBlank() }?.let {
-                    appendLine(it)
+                // An image the transcript draws is shown below the details instead of as a word.
+                is ToolCallContentBlock -> if (isDrawnImage(content)) {
                     reported = true
+                } else {
+                    content.content.plainText.takeIf { it.isNotBlank() }?.let {
+                        appendLine(it)
+                        reported = true
+                    }
                 }
                 is ToolCallTerminal -> appendLine("[terminal ${content.terminalId}]")
                 is UnknownToolCallContent -> appendLine(content.raw?.toString().orEmpty())
@@ -149,9 +156,13 @@ object ToolCallPresentation {
         // same text there), so it is a fallback for the calls that report nothing as content.
         if (!reported) toolCall.rawOutput?.let { appendLine("output: $it") }
     }.trim().ifEmpty {
-        // A tool call that only reported a diff has its whole story in the diff rows below.
-        if (toolCall.diffs.isEmpty()) "No details reported by the agent" else ""
+        // A tool call that only reported a diff (or an image) has its whole story in the rows below.
+        val drawn = toolCall.content.any { it is ToolCallContentBlock && isDrawnImage(it) }
+        if (toolCall.diffs.isEmpty() && !drawn) "No details reported by the agent" else ""
     }
+
+    private fun isDrawnImage(content: ToolCallContentBlock): Boolean =
+        (content.content as? ImageContentBlock)?.let { TranscriptImages.dataUri(it) != null } == true
 
     /** Body of an expanded tool call: the full command, then everything the agent reported back. */
     fun expandedBody(toolCall: ToolCall): String {

@@ -65,6 +65,7 @@ class PlainTextTranscriptView : TranscriptView {
                 is StreamEvent -> text.append(event.text)
                 is BlockHtmlEvent -> Unit
                 is AttachmentsEvent -> line(event.chips.joinToString(", ") { it.label })
+                is ImagesEvent -> line(event.alt)
                 is ToolCallEvent -> line(event.switchMode?.headline ?: event.question?.headline ?: event.anchor)
                 is PermissionEvent -> line(event.headline)
                 is PermissionResolvedEvent -> line(event.status)
