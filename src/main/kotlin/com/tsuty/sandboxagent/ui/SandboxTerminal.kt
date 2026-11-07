@@ -27,7 +27,7 @@ object SandboxTerminal {
 
     /** Whether a terminal can be opened at all, which is what the menu entry is enabled on. */
     fun isAvailable(): Boolean =
-        PluginManagerCore.getPlugin(PluginId.getId(TERMINAL_PLUGIN_ID))?.isEnabled == true
+        PluginManagerCore.isLoaded(PluginId.getId(TERMINAL_PLUGIN_ID))
 
     fun open(project: Project) {
         val settings = SandboxAgentSettingsState.getInstance(project)
