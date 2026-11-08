@@ -75,7 +75,7 @@ intellijPlatform {
             // releases of the last year. IU: from 2026.1 on IntelliJ IDEA has no IC distribution.
             create("IU", "2025.3.6.1")
             // Upper bound: latest release.
-            create("IU", "2026.2.3")
+            create("IU", "2026.3")
         }
     }
 }

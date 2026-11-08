@@ -27,7 +27,7 @@ ACP feature support matrix — update it whenever ACP handling changes. Also use
 ./gradlew test --tests "com.tsuty.sandboxagent.acp.AcpClientTest.someTest" # single test method
 ./gradlew buildPlugin                # build the plugin zip -> build/distributions/SandboxAgentConnector-<version>.zip
 ./gradlew runIde                     # launch a sandbox IDE with the plugin installed, for manual testing
-./gradlew verifyPlugin               # plugin configuration + binary compatibility check (IU 2025.3.6.1, IU 2026.2.3)
+./gradlew verifyPlugin               # plugin configuration + binary compatibility check (IU 2025.3.6.1, IU 2026.3)
 ```
 
 - JDK 21 is required to build (`kotlin { jvmToolchain(21) }`); the Gradle daemon JVM itself only needs 17+.

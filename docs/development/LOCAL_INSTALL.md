@@ -59,7 +59,7 @@ SandboxAgentConnector/lib/kotlinx-serialization-json-jvm-1.7.3.jar
 ```
 
 The report from `verifyPlugin` will be generated at `build/reports/pluginVerifier/<IDE build number>/report.html`.
-Verification targets are explicitly configured in `../../build.gradle.kts` under `pluginVerification { ides { ... } }` (the baseline IntelliJ IDEA 2025.3.6.1 and the latest release 2026.2.3, both as IU).
+Verification targets are explicitly configured in `../../build.gradle.kts` under `pluginVerification { ides { ... } }` (the baseline IntelliJ IDEA 2025.3.6.1 and the latest release 2026.3, both as IU).
 As of version 0.0.1, there are **0 compatibility issues (Compatible)** for both IDEs.
 
 ---
