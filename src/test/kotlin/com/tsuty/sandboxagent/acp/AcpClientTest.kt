@@ -1,6 +1,7 @@
 package com.tsuty.sandboxagent.acp
 
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -463,6 +464,37 @@ class AcpClientTest {
         val client = AcpClient(writeLine = { })
         assertFailsWith<AcpTimeoutException> { client.request(AcpMethods.INITIALIZE, timeoutMillis = 50) }
         Unit
+    }
+
+    @Test
+    fun `a request given up on is withdrawn with cancel request`() = runBlocking {
+        val sent = mutableListOf<String>()
+        val client = AcpClient(writeLine = { synchronized(sent) { sent += it } })
+
+        assertFailsWith<AcpTimeoutException> { client.request(AcpMethods.SESSION_LIST, timeoutMillis = 50) }
+        val request = AcpJson.decodeFromString(JsonRpcRequest.serializer(), sent.first())
+        val cancel = AcpJson.decodeFromString(JsonRpcNotification.serializer(), sent.last())
+        assertEquals(AcpMethods.CANCEL_REQUEST, cancel.method)
+        assertEquals(request.id, cancel.params!!.jsonObject["requestId"])
+
+        // A caller that went away withdraws its request as well.
+        val load = async { client.request(AcpMethods.SESSION_LOAD, timeoutMillis = null) }
+        while (sent.size < 3) delay(5)
+        load.cancelAndJoin()
+        val loadId = AcpJson.decodeFromString(JsonRpcRequest.serializer(), sent[2]).id
+        assertEquals(loadId, AcpJson.decodeFromString(JsonRpcNotification.serializer(), sent.last()).params!!.jsonObject["requestId"])
+    }
+
+    @Test
+    fun `a prompt is never withdrawn with cancel request, it has session cancel`() = runBlocking {
+        val sent = mutableListOf<String>()
+        val client = AcpClient(writeLine = { synchronized(sent) { sent += it } })
+
+        val prompt = async { client.request(AcpMethods.SESSION_PROMPT, timeoutMillis = null) }
+        while (sent.isEmpty()) delay(5)
+        prompt.cancelAndJoin()
+
+        assertEquals(1, sent.size)
     }
 
     @Test

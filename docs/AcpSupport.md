@@ -38,7 +38,7 @@ Legend used below:
 | `fs.readTextFile` / `fs.writeTextFile` | `false` (by design) | The agent works on the files inside the sandbox. |
 | `terminal` | `false` (by design) | Commands run inside the sandbox. |
 | `elicitation.form` | `{}` while JCEF is available | Without JCEF the field is omitted. |
-| `elicitation.url` | Omitted | URL mode would need the target shown and consented to before navigating. |
+| `elicitation.url` | Omitted (by design) | The URL would be opened in the browser of the host, outside the sandbox, and a callback to `localhost` would reach the host rather than the sandbox. |
 | `auth.terminal` | Omitted (by design) | Authentication is set up in the sandbox beforehand. |
 | `session.configOptions.boolean` | `{}` | Drawn as a toggle (§5), with or without JCEF. |
 | `session.notices` | `{}` | Shown as a line of the transcript (§4), with or without JCEF. |
@@ -56,8 +56,8 @@ An omitted capability means "unsupported" to the agent, which then must not use 
 |---|---|---|
 | `initialize` | Yes | Idle timeout instead of a hard deadline (first-run `npx` downloads). |
 | `authenticate` | By design | `authMethods` are only logged; authentication is done in the sandbox. |
-| `logout` | No | |
-| `session/new` | Yes | `mcpServers` is always `[]` (MCP servers are configured on the agent side). `additionalDirectories` is not sent. |
+| `logout` | By design | Authentication is set up in the sandbox, and the IDE could not log in again. |
+| `session/new` | Yes | `mcpServers` is always `[]` (by design): an MCP server of the IDE would run in the sandbox with what the IDE hands it, and the IDE's own MCP server would reach the host. `additionalDirectories` is not sent (by design): the IDE does not know the mounts of the sandbox, which are set up on its side. |
 | `session/load` | Yes | When `loadSession` is declared. |
 | `session/resume` | Yes | When `sessionCapabilities.resume` is declared. |
 | `session/list` | Yes | When `sessionCapabilities.list` is declared; pages are followed. |
@@ -68,7 +68,7 @@ An omitted capability means "unsupported" to the agent, which then must not use 
 | `session/set_mode` | Yes | |
 | `session/set_config_option` | Yes | `select` and `boolean` options (§5). |
 | `session/set_model` | Yes (legacy) | Not in the v1.15 schema; kept for agents that still report `models` instead of a `model` config option. |
-| `$/cancel_request` | No (sending) | The plugin never withdraws a request it sent. |
+| `$/cancel_request` | Yes | Sent for a request that timed out or whose caller went away, except `session/prompt` (it has `session/cancel`). |
 
 ### 3.2. Agent → Client
 
@@ -77,7 +77,7 @@ An omitted capability means "unsupported" to the agent, which then must not use 
 | `session/update` | Yes | Variants in §4. |
 | `session/request_permission` | Yes | Inline permission card; answered `cancelled` when the turn is stopped. |
 | `elicitation/create` | Partial | Form mode only; a form with a property the plugin cannot draw is refused with `-32602`. |
-| `elicitation/complete` | No | Belongs to URL mode, which is not advertised. |
+| `elicitation/complete` | By design | Belongs to URL mode, which is not advertised. |
 | `$/cancel_request` | Yes | Withdraws a pending permission request or form. |
 | `fs/*`, `terminal/*` | By design | Answered with `-32601` (method not found), as is any other unknown request. |
 
@@ -137,15 +137,15 @@ that only clarified wording are left out.
 | v0.11.1 | `session/list`, `session_info_update` | Yes |
 | v0.12.2 | `session/resume` | Yes |
 | v0.12.2 | `session/close` | Yes |
-| v0.13.3 | `logout` | No |
-| v0.13.5 | `additionalDirectories` for sessions | No |
+| v0.13.3 | `logout` | By design |
+| v0.13.5 | `additionalDirectories` for sessions | By design |
 | v0.13.6 | Optional message IDs (`messageId`) | Yes |
 | v0.13.6 | `usage_update` | Yes |
 | v0.13.6 | `session/delete` | Yes |
 | v1.1.0 | `model` config option category | Yes |
-| v1.2.0 | Request cancellation (`$/cancel_request`) | Yes (receiving) |
+| v1.2.0 | Request cancellation (`$/cancel_request`) | Yes |
 | v1.3.0 | Boolean session config options | Yes |
-| v1.7.0 | Elicitation | Partial (form mode) |
+| v1.7.0 | Elicitation | Partial (form mode; URL mode by design) |
 | v1.7.0 | Terminal authentication | By design |
 | v1.8.0 | Tool call `name` | Yes |
 | v1.11.0 | Session notices | Yes |

@@ -107,6 +107,9 @@ class AcpClient(
 
     private val idSequence = AtomicLong(0)
     private val pending = ConcurrentHashMap<String, CompletableFuture<JsonRpcResponse>>()
+
+    /** Requests given up on (see [withdraw]), whose late answer is expected rather than odd. */
+    private val withdrawn: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val lineAccumulator = LineAccumulator()
 
     /** Last moment the agent process produced any output, on `stdout` or on `stderr`. */
@@ -217,9 +220,28 @@ class AcpClient(
                 else -> await()
             }
         } catch (e: TimeoutCancellationException) {
-            pending.remove(id.key)
+            withdraw(method, id)
             throw AcpTimeoutException("ACP request '$method' timed out after ${timeoutMillis}ms")
+        } catch (e: CancellationException) {
+            // The caller went away (a tab was closed, another session was entered): the agent is
+            // told, so it can stop working on an answer nobody waits for any more.
+            withdraw(method, id)
+            throw e
         }
+    }
+
+    /**
+     * Gives up on the request [id]: it is forgotten here, and `$/cancel_request` asks the agent to
+     * stop working on it. Only sent while the request is still unanswered, and never for
+     * `session/prompt`, which has `session/cancel` of its own. Best effort: the agent still
+     * answers the request (usually with `-32800`), and that late answer is dropped.
+     */
+    private fun withdraw(method: String, id: JsonRpcId) {
+        if (pending.remove(id.key) == null || method == AcpMethods.SESSION_PROMPT) return
+        withdrawn += id.key
+        runCatching {
+            sendNotification(AcpMethods.CANCEL_REQUEST, JsonObject(mapOf("requestId" to id)))
+        }.onFailure { log.info("Could not withdraw the ACP request '$method' (${id.content})", it) }
     }
 
     /**
@@ -239,13 +261,13 @@ class AcpClient(
             try {
                 delay(IDLE_POLL_MILLIS)
             } catch (e: Exception) {
-                pending.remove(id.key)
+                withdraw(method, id)
                 future.cancel(false)
                 throw e
             }
             val idle = idleMillis
             if (idle < idleTimeoutMillis) continue
-            pending.remove(id.key)
+            withdraw(method, id)
             future.cancel(false)
             throw AcpTimeoutException(
                 "ACP request '$method' timed out: the agent produced no output for ${idle / 1000}s",
@@ -470,7 +492,11 @@ class AcpClient(
             is AcpIncoming.Response -> {
                 val future = pending.remove(incoming.response.id.key)
                 if (future == null) {
-                    log.warn("Received response for unknown request id ${incoming.response.id}")
+                    if (withdrawn.remove(incoming.response.id.key)) {
+                        log.debug("Dropped the late response to the withdrawn request ${incoming.response.id}")
+                    } else {
+                        log.warn("Received response for unknown request id ${incoming.response.id}")
+                    }
                 } else {
                     future.complete(incoming.response)
                 }
