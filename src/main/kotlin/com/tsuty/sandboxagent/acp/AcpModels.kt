@@ -1494,26 +1494,41 @@ data class AcpContextItem(
     val endLine: Int? = null,
     /** An attached image file: sent as an `image` block instead of text (see [toContentBlock]). */
     val image: PromptImage? = null,
+    /**
+     * Sent as a `resource_link` the agent reads inside the sandbox, without [content]: a directory
+     * always, a whole file when the user chose links (see `attachFilesAsLinks`). Decided when the
+     * file is attached, which is also when its contents would have been read.
+     */
+    val link: Boolean = false,
 ) {
     val presentableRange: String?
         get() = if (startLine != null && endLine != null) "$startLine-$endLine" else null
 
-    fun toContentBlock(embeddedContext: Boolean = true): ContentBlock =
-        if (image != null) {
-            // The URI is what a replay reads the chip back from (see [promptAttachments]).
-            ImageContentBlock(data = image.data, mimeType = image.mimeType, uri = uri())
-        } else if (embeddedContext) {
-            EmbeddedResourceContentBlock(EmbeddedResource(uri = uri(), text = content))
-        } else {
-            TextContentBlock(inlined())
+    /**
+     * The block this attachment goes as. Its URI names the file where the *agent* sees it, which
+     * [paths] translates the host path to; a replay reads the chip back from that URI (see
+     * [promptAttachments]) and translates it back.
+     */
+    fun toContentBlock(embeddedContext: Boolean = true, paths: SandboxPaths = SandboxPaths.IDENTITY): ContentBlock {
+        val uri = uri(paths.toSandbox(path))
+        return when {
+            image != null -> ImageContentBlock(data = image.data, mimeType = image.mimeType, uri = uri)
+            // A selection is a snippet the user picked: it always goes with the text it had.
+            link && presentableRange == null -> ResourceLinkContentBlock(uri = uri, name = presentableName)
+            embeddedContext -> EmbeddedResourceContentBlock(EmbeddedResource(uri = uri, text = content))
+            else -> TextContentBlock(inlined(uri))
         }
+    }
+
+    private val presentableName: String
+        get() = path.trimEnd('/').substringAfterLast('/').ifEmpty { path }
 
     /**
      * The attachment as text, in the `<context ref="file://…">…</context>` markup agents replay an
      * attachment in: a replayed prompt is then read back into the same chip (see
      * [promptAttachments]) and stripped from the typed text (see [promptTextWithoutAttachments]).
      */
-    private fun inlined(): String = "<context ref=\"${uri()}\">\n$content\n</context>"
+    private fun inlined(uri: String): String = "<context ref=\"$uri\">\n$content\n</context>"
 
     /**
      * The chip of this attachment: the reference alone for a file, the snippet as well for a
@@ -1530,7 +1545,7 @@ data class AcpContextItem(
      * Percent-encoded, so a replayed mention of a path with spaces, parentheses or non-ASCII
      * characters is still read back as one URI (see [promptAttachments]).
      */
-    private fun uri(): String {
+    private fun uri(path: String): String {
         val encoded = encodeUriPath(path)
         val base = if (path.startsWith("/")) "file://$encoded" else "file:///$encoded"
         return presentableRange?.let { "$base#L$it" } ?: base

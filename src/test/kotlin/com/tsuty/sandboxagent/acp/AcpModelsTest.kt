@@ -859,4 +859,22 @@ class AcpModelsTest {
         )
         assertEquals(CompactionSummaryChunk("c1", TextContentBlock("x")), chunk)
     }
+
+    @Test
+    fun `a linked file goes as a resource link where the agent sees it, a selection with its text`() {
+        val paths = SandboxPaths("/Users/me/project", "/workspace")
+        val file = AcpContextItem(path = "/Users/me/project/src/A b.kt", content = "", link = true)
+
+        val link = assertIs<ResourceLinkContentBlock>(file.toContentBlock(embeddedContext = true, paths = paths))
+
+        assertEquals(ResourceLinkContentBlock(uri = "file:///workspace/src/A%20b.kt", name = "A b.kt"), link)
+        assertEquals("/workspace/src/A b.kt", link.promptAttachments.single().path)
+        // A selection is a snippet: even marked as a link, it goes with the text it had.
+        val selection = AcpContextItem("/Users/me/project/src/A.kt", "val a = 1", startLine = 2, endLine = 2, link = true)
+        val embedded = assertIs<EmbeddedResourceContentBlock>(selection.toContentBlock(embeddedContext = true, paths = paths))
+        assertEquals("file:///workspace/src/A.kt#L2-2", embedded.resource.uri)
+        assertEquals("val a = 1", embedded.resource.text)
+        val image = AcpContextItem("/Users/me/project/shot.png", "", image = PromptImage("image/png", "AAAA"))
+        assertEquals("file:///workspace/shot.png", assertIs<ImageContentBlock>(image.toContentBlock(paths = paths)).uri)
+    }
 }

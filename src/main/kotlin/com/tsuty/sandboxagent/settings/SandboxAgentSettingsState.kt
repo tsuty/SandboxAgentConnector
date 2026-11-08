@@ -77,6 +77,13 @@ class SandboxAgentSettingsState : PersistentStateComponent<SandboxAgentSettingsS
     var autoAttachContext: Boolean = false
 
     /**
+     * An attached file goes as a `resource_link` the agent reads inside the sandbox, rather than
+     * with its contents; a selection always goes with its contents. Off for a sandbox whose files
+     * are not the ones the IDE shows (a clone of the workspace, a path that is not mounted).
+     */
+    var attachFilesAsLinks: Boolean = true
+
+    /**
      * Silence, in seconds, that gives up on a starting agent. It is *not* a deadline: the wait
      * only ends when the agent produced no output at all for that long, so a slow `npx` download
      * stretches the wait instead of failing it.

@@ -21,6 +21,7 @@ class SettingsSerializationTest {
         assertEquals("npx -y @agentclientprotocol/claude-agent-acp", settings.defaultAgent().agent().command)
         assertEquals("", settings.sandboxWorkspacePath)
         assertFalse(settings.autoAttachContext)
+        assertTrue(settings.attachFilesAsLinks)
         assertEquals(180, settings.initializeIdleTimeoutSeconds)
     }
 
@@ -91,6 +92,7 @@ class SettingsSerializationTest {
             )
             sandboxWorkspacePath = "/workspace"
             autoAttachContext = true
+            attachFilesAsLinks = false
             initializeIdleTimeoutSeconds = 300
         }
 
@@ -107,6 +109,7 @@ class SettingsSerializationTest {
         assertEquals("/opt/goose/goose acp", restored.agentById("goose")?.agent()?.command)
         assertEquals(original.sandboxWorkspacePath, restored.sandboxWorkspacePath)
         assertEquals(original.autoAttachContext, restored.autoAttachContext)
+        assertEquals(original.attachFilesAsLinks, restored.attachFilesAsLinks)
         assertEquals(original.initializeIdleTimeoutSeconds, restored.initializeIdleTimeoutSeconds)
     }
 

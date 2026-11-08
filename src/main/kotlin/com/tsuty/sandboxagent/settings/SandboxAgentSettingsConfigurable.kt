@@ -177,6 +177,16 @@ class SandboxAgentSettingsConfigurable(private val project: Project) : BoundConf
             row {
                 checkBox("Auto-attach context (active file or selection)").bindSelected(settings::autoAttachContext)
             }
+            row {
+                checkBox("Send attached files as links").bindSelected(settings::attachFilesAsLinks)
+            }
+            row {
+                comment(
+                    "The agent reads a linked file inside the sandbox, so the IDE sends no file contents. Turn it " +
+                        "off when the sandbox does not see the files of the IDE (a clone of the workspace, a path " +
+                        "that is not mounted): the contents are sent instead. A selection is always sent with its contents.",
+                )
+            }
         }
 
         groupRowsRange("Appearance") {

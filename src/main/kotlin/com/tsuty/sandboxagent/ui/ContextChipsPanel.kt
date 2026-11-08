@@ -115,16 +115,18 @@ class ContextChipsPanel(private val project: Project) :
         if (!file.isDirectory && file.fileType.isBinary) return false
 
         if (file.isDirectory) {
-            val item = AcpContextItem(path = file.path, content = "")
+            // A directory has no contents to send: it is always a link to where it is.
+            val item = AcpContextItem(path = file.path, content = "", link = true)
             addEntry(Entry("dir:${file.path}", file.name.ifEmpty { project.name }, item))
             return true
         }
 
-        val content = ReadAction.compute<String, RuntimeException> {
-            val doc = FileDocumentManager.getInstance().getDocument(file)
-            doc?.text ?: runCatching { VfsUtilCore.loadText(file) }.getOrDefault("")
+        val item = fileItem(file.path) {
+            ReadAction.compute<String, RuntimeException> {
+                val doc = FileDocumentManager.getInstance().getDocument(file)
+                doc?.text ?: runCatching { VfsUtilCore.loadText(file) }.getOrDefault("")
+            }
         }
-        val item = AcpContextItem(path = file.path, content = content)
         addEntry(Entry("file:${file.path}", file.name, item))
         return true
     }
@@ -145,7 +147,7 @@ class ContextChipsPanel(private val project: Project) :
         val snapshot = readEditorSnapshot() ?: return false
         val virtualFile = LocalFileSystem.getInstance().findFileByPath(snapshot.path) ?: return false
         if (!AttachFileUtils.isInsideProject(virtualFile, project)) return false
-        val item = AcpContextItem(path = snapshot.path, content = snapshot.text)
+        val item = fileItem(snapshot.path) { snapshot.text }
         addEntry(Entry("file:${snapshot.path}", snapshot.presentableName, item))
         return true
     }
@@ -215,6 +217,20 @@ class ContextChipsPanel(private val project: Project) :
         refreshAutoAttachPreview()
     }
 
+    /**
+     * A whole file: a link the agent reads inside the sandbox, or its contents, as the settings
+     * say. [content] is only read in the latter case, which is the point of a link.
+     */
+    private fun fileItem(path: String, content: () -> String): AcpContextItem =
+        if (attachesFilesAsLinks()) {
+            AcpContextItem(path = path, content = "", link = true)
+        } else {
+            AcpContextItem(path = path, content = content())
+        }
+
+    private fun attachesFilesAsLinks(): Boolean =
+        runCatching { SandboxAgentSettingsState.getInstance(project) }.getOrNull()?.attachFilesAsLinks ?: true
+
     private fun isAutoAttachEnabled(): Boolean =
         runCatching { SandboxAgentSettingsState.getInstance(project) }.getOrNull()?.autoAttachContext == true
 
@@ -229,7 +245,7 @@ class ContextChipsPanel(private val project: Project) :
         val fileEntry = Entry(
             "file:${snapshot.path}",
             snapshot.presentableName,
-            AcpContextItem(path = snapshot.path, content = snapshot.text),
+            fileItem(snapshot.path) { snapshot.text },
         )
         val selection = snapshot.selectedText ?: return listOf(fileEntry)
         val selectionEntry = Entry(

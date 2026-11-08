@@ -46,6 +46,7 @@ import com.tsuty.sandboxagent.acp.PromptAttachment
 import com.tsuty.sandboxagent.acp.RequestPermissionParams
 import com.tsuty.sandboxagent.acp.SandboxConfig
 import com.tsuty.sandboxagent.acp.SandboxProcessListener
+import com.tsuty.sandboxagent.acp.SandboxPaths
 import com.tsuty.sandboxagent.acp.SandboxProcessManager
 import com.tsuty.sandboxagent.acp.SandboxStartupException
 import com.tsuty.sandboxagent.acp.SandboxVariables
@@ -1402,6 +1403,19 @@ class SandboxAgentService(
         return if (SystemInfo.isWindows) windowsPathToPosix(basePath) else basePath
     }
 
+    /**
+     * The project root on the host is the `cwd` in the sandbox (see [resolvedCwd]): the URI of an
+     * attachment names the file where the agent sees it, and a replayed one is read back.
+     */
+    private fun sandboxPaths(): SandboxPaths =
+        project.basePath?.let { SandboxPaths(it, resolvedCwd()) } ?: SandboxPaths.IDENTITY
+
+    /** The chips a replayed prompt carries, with the paths of the host again. */
+    private fun hostAttachments(content: ContentBlock): List<PromptAttachment> {
+        val paths = sandboxPaths()
+        return content.promptAttachments.map { it.copy(path = paths.toHost(it.path)) }
+    }
+
     /** Sends a prompt in the background; returns immediately. */
     fun sendPrompt(prompt: String, context: List<AcpContextItem> = emptyList()): Job {
         val job = scope.launch { sendPromptSuspending(prompt, context) }
@@ -1479,7 +1493,8 @@ class SandboxAgentService(
         if (sendable.size < context.size) log.warn("Dropped ${context.size - sendable.size} image(s) the agent does not take")
         return buildList {
             add(TextContentBlock(prompt))
-            sendable.forEach { add(it.toContentBlock(embeddedContext)) }
+            val paths = sandboxPaths()
+            sendable.forEach { add(it.toContentBlock(embeddedContext, paths)) }
         }
     }
 
@@ -1890,7 +1905,7 @@ class SandboxAgentService(
         is ThoughtChunkUpdate -> listOf(SandboxAgentEvent.AgentThoughtChunk(update.content.plainText))
         is UserMessageChunkUpdate -> {
             val text = update.content.userPromptText
-            val attachments = update.content.promptAttachments
+            val attachments = hostAttachments(update.content)
             when {
                 text != null -> listOf(SandboxAgentEvent.UserPrompt(text, attachments))
                 attachments.isNotEmpty() -> listOf(SandboxAgentEvent.UserPromptAttachments(attachments))
@@ -1913,7 +1928,7 @@ class SandboxAgentService(
      */
     private fun publishUserMessageChunk(content: ContentBlock) {
         val text = content.userPromptText
-        val attachments = content.promptAttachments
+        val attachments = hostAttachments(content)
         when {
             text != null -> publish(SandboxAgentEvent.UserPrompt(text, attachments))
             attachments.isNotEmpty() -> publish(SandboxAgentEvent.UserPromptAttachments(attachments))
