@@ -17,7 +17,7 @@ A feature also needs the agent: the plugin can only use what the agent declares 
 |---|---|
 | Protocol version | `1` (sent in `initialize`; an agent answering less than 1 is an error) |
 | Checked against | ACP release `v1.15.1` / `schema-v1.29.1` (2026-11-02), `schema/v1/schema.json` and `meta.json` |
-| Plugin version | 0.0.6 |
+| Plugin version | 0.0.7 |
 | Unstable features (`schema.unstable.json`) | Not implemented, see §7 |
 | ACP v2 (`schema-v2.0.0-alpha.*`) | Not implemented |
 

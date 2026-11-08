@@ -76,6 +76,30 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.0.7</h3>
+    <ul>
+        <li>Attached files are sent as links that the agent reads inside the sandbox, so the IDE no longer reads them.
+            Turn off <code>Send attached files as links</code> (<code>Context Attach</code> in the settings) to send their
+            contents instead, for a sandbox that does not see the files of the IDE. Selections are always sent with their
+            contents.</li>
+        <li>Attached contents reach agents that do not accept embedded resources too, inlined into the prompt text.</li>
+        <li><code>Attach File</code> takes PNG, JPEG, GIF and WebP images of up to 5 MiB for agents that accept images;
+            their chip shows a thumbnail. Other binary files are refused instead of being sent as garbled text.</li>
+        <li>Images sent by the agent in its messages and tool call results are shown. Images are not stored: restored
+            sessions show an <code>[image &lt;type&gt;]</code> placeholder.</li>
+        <li>Context compactions appear in the chat as one entry (<code>Compacting the context…</code>,
+            <code>Context compacted</code>) with the summary folded away, and are kept in restored sessions.</li>
+        <li>Notices of the agent are shown as one line in the chat, colored by severity.</li>
+        <li>On/off options of the agent are shown as a toggle in the prompt action bar.</li>
+        <li>A tool call without a title is named after its tool.</li>
+        <li>A streaming answer is rendered as Markdown while it streams, also when the agent keeps answering after
+            its turn ended.</li>
+        <li>Sessions and ACP logs are kept across IDE updates and shared between JetBrains IDEs; sessions of earlier
+            versions are copied over once. ACP logs are deleted after 60 days.</li>
+        <li>The session a tab leaves is closed on the agent side, for agents that support it, and a request that
+            timed out is withdrawn from the agent.</li>
+        <li>The sandbox terminal opens in the current terminal of the IDE instead of the Classic one.</li>
+    </ul>
     <h3>0.0.6</h3>
     <ul>
         <li>A failed agent start explains why: a sandbox command missing from the <code>PATH</code>, a sandbox that does
